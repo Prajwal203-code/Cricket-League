@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" width="100%" height="100%">
+  <rect width="1200" height="600" fill="#00008B"/>
+  <!-- Union Jack Canton -->
+  <g>
+    <clipPath id="cantonClip">
+      <rect width="600" height="300"/>
+    </clipPath>
+    <g clip-path="url(#cantonClip)">
+      <rect width="600" height="300" fill="#00247D"/>
+      <!-- St Andrew & St Patrick Diagonals -->
+      <line x1="0" y1="0" x2="600" y2="300" stroke="#FFFFFF" stroke-width="60"/>
+      <line x1="600" y1="0" x2="0" y2="300" stroke="#FFFFFF" stroke-width="60"/>
+      <line x1="0" y1="0" x2="600" y2="300" stroke="#CC0000" stroke-width="20"/>
+      <line x1="600" y1="0" x2="0" y2="300" stroke="#CC0000" stroke-width="20"/>
+      <!-- St George Cross -->
+      <line x1="300" y1="0" x2="300" y2="300" stroke="#FFFFFF" stroke-width="100"/>
+      <line x1="0" y1="150" x2="600" y2="150" stroke="#FFFFFF" stroke-width="100"/>
+      <line x1="300" y1="0" x2="300" y2="300" stroke="#CC0000" stroke-width="60"/>
+      <line x1="0" y1="150" x2="600" y2="150" stroke="#CC0000" stroke-width="60"/>
+    </g>
+  </g>
+  <!-- Commonwealth 7-Point Star -->
+  <g transform="translate(300, 450) scale(0.65)">
+    <polygon points="0,-100 22,-22 97,-43 43,22 78,90 0,43 -78,90 -43,22 -97,-43 -22,-22" fill="#FFFFFF"/>
+  </g>
+  <!-- Southern Cross Stars -->
+  <g transform="translate(900, 300)" fill="#FFFFFF">
+    <!-- Gamma Crucis (top) -->
+    <g transform="translate(0, -180) scale(0.35)"><polygon points="0,-100 22,-22 97,-43 43,22 78,90 0,43 -78,90 -43,22 -97,-43 -22,-22"/></g>
+    <!-- Alpha Crucis (bottom) -->
+    <g transform="translate(0, 180) scale(0.35)"><polygon points="0,-100 22,-22 97,-43 43,22 78,90 0,43 -78,90 -43,22 -97,-43 -22,-22"/></g>
+    <!-- Beta Crucis (left) -->
+    <g transform="translate(-150, -40) scale(0.35)"><polygon points="0,-100 22,-22 97,-43 43,22 78,90 0,43 -78,90 -43,22 -97,-43 -22,-22"/></g>
+    <!-- Delta Crucis (right) -->
+    <g transform="translate(140, -90) scale(0.35)"><polygon points="0,-100 22,-22 97,-43 43,22 78,90 0,43 -78,90 -43,22 -97,-43 -22,-22"/></g>
+    <!-- Epsilon Crucis (small 5-pt star) -->
+    <g transform="translate(50, 40) scale(0.2)"><polygon points="0,-100 59,81 -95,-31 95,-31 -59,81"/></g>
+  </g>
+</svg>

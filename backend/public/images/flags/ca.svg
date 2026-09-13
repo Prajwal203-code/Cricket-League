@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" width="100%" height="100%">
+  <rect width="300" height="600" fill="#FF0000"/>
+  <rect x="300" width="600" height="600" fill="#FFFFFF"/>
+  <rect x="900" width="300" height="600" fill="#FF0000"/>
+  <!-- Maple Leaf -->
+  <g transform="translate(600, 310) scale(1.8)" fill="#FF0000">
+    <path d="M 0 -80 L 15 -45 L 35 -55 L 30 -30 L 60 -30 L 55 -5 L 30 10 L 45 35 L 20 30 L 15 45 L 5 40 L 5 75 L -5 75 L -5 40 L -15 45 L -20 30 L -45 35 L -30 10 L -55 -5 L -60 -30 L -30 -30 L -35 -55 L -15 -45 Z"/>
+  </g>
+</svg>

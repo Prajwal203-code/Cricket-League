@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 600" width="100%" height="100%">
+  <rect width="900" height="600" fill="#01411C"/>
+  <rect width="225" height="600" fill="#FFFFFF"/>
+  <g transform="translate(562.5, 300) rotate(-40)">
+    <!-- Crescent Moon -->
+    <path d="M 0 -150 A 150 150 0 1 0 0 150 A 120 120 0 1 1 0 -150 Z" fill="#FFFFFF"/>
+    <!-- Five-Pointed Star -->
+    <polygon points="60,0 80,-55 130,-20 90,20 105,70 60,35 15,70 30,20 -10,-20 40,-55" fill="#FFFFFF" transform="translate(60, -25) scale(0.6)"/>
+  </g>
+</svg>

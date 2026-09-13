@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 700" width="100%" height="100%">
+  <rect width="1000" height="700" fill="#009739"/>
+  <polygon points="500,80 920,350 500,620 80,350" fill="#FEDD00"/>
+  <circle cx="500" cy="350" r="175" fill="#012169"/>
+  <!-- White celestial band -->
+  <path d="M 330 380 Q 500 280 670 330 Q 500 260 330 380 Z" fill="#FFFFFF"/>
+</svg>

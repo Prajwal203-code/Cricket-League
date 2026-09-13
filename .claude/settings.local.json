@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import bpy; print\\('Blender bpy AVAILABLE'\\)\")",
+      "Bash(python -c \"import trimesh; print\\('trimesh', trimesh.__version__\\)\")",
+      "Bash(python -c \"import pyrender; print\\('pyrender OK'\\)\")",
+      "Bash(python -c \"import PIL; print\\('PIL', PIL.__version__\\)\")",
+      "Bash(python -c \"import numpy; print\\('numpy', numpy.__version__\\)\")",
+      "Bash(python -c \"import json;d=json.load\\(open\\('meshy_urls.json'\\)\\);print\\(type\\(d\\)\\); print\\(list\\(d.keys\\(\\)\\)[:20] if isinstance\\(d,dict\\) else \\('list len',len\\(d\\)\\)\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(curl -sL -o rpm_bootstrap.glb \"https://models.readyplayer.me/64bfa15f0e72c63d7c3934a6.glb?quality=high&meshLod=0&textureAtlas=1024&pose=A&morphTargets=none\" -w \"HTTP %{http_code}  %{size_download} bytes\\\\n\")",
+      "Bash(curl -sS -m 12 -o /dev/null -w \"readyplayer.me: HTTP %{http_code} \\(%{time_total}s\\)\\\\n\" \"https://readyplayer.me\")",
+      "Bash(curl -sS -m 12 -o /dev/null -w \"models.rpm: HTTP %{http_code}\\\\n\" \"https://models.readyplayer.me/64bfa15f0e72c63d7c3934a6.glb\")",
+      "Bash(curl -sS -m 12 -o /dev/null -w \"google: HTTP %{http_code}\\\\n\" \"https://www.google.com\")",
+      "Bash(curl -sS -m 12 -o /dev/null -w \"github raw: HTTP %{http_code}\\\\n\" \"https://raw.githubusercontent.com\")",
+      "Bash(curl -sS -m 12 -o /dev/null -w \"rpm root: HTTP %{http_code}\\\\n\" \"https://readyplayer.me\")",
+      "Bash(nslookup models.readyplayer.me)",
+      "Bash(curl -sS -m 12 -o /dev/null -w \"jsdelivr: HTTP %{http_code}\\\\n\" \"https://cdn.jsdelivr.net\")",
+      "Bash(python build_hero_kit.py)"
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1140 600" width="100%" height="100%">
+  <!-- 13 Stripes -->
+  <rect width="1140" height="600" fill="#B22234"/>
+  <rect y="46.15" width="1140" height="46.15" fill="#FFFFFF"/>
+  <rect y="138.46" width="1140" height="46.15" fill="#FFFFFF"/>
+  <rect y="230.77" width="1140" height="46.15" fill="#FFFFFF"/>
+  <rect y="323.08" width="1140" height="46.15" fill="#FFFFFF"/>
+  <rect y="415.38" width="1140" height="46.15" fill="#FFFFFF"/>
+  <rect y="507.69" width="1140" height="46.15" fill="#FFFFFF"/>
+  <!-- Canton -->
+  <rect width="456" height="323.08" fill="#3C3B6E"/>
+  <!-- White Stars Grid -->
+  <g fill="#FFFFFF" transform="translate(25, 20)">
+    <circle cx="30" cy="20" r="10"/><circle cx="90" cy="20" r="10"/><circle cx="150" cy="20" r="10"/><circle cx="210" cy="20" r="10"/><circle cx="270" cy="20" r="10"/><circle cx="330" cy="20" r="10"/>
+    <circle cx="60" cy="60" r="10"/><circle cx="120" cy="60" r="10"/><circle cx="180" cy="60" r="10"/><circle cx="240" cy="60" r="10"/><circle cx="300" cy="60" r="10"/>
+    <circle cx="30" cy="100" r="10"/><circle cx="90" cy="100" r="10"/><circle cx="150" cy="100" r="10"/><circle cx="210" cy="100" r="10"/><circle cx="270" cy="100" r="10"/><circle cx="330" cy="100" r="10"/>
+    <circle cx="60" cy="140" r="10"/><circle cx="120" cy="140" r="10"/><circle cx="180" cy="140" r="10"/><circle cx="240" cy="140" r="10"/><circle cx="300" cy="140" r="10"/>
+    <circle cx="30" cy="180" r="10"/><circle cx="90" cy="180" r="10"/><circle cx="150" cy="180" r="10"/><circle cx="210" cy="180" r="10"/><circle cx="270" cy="180" r="10"/><circle cx="330" cy="180" r="10"/>
+    <circle cx="60" cy="220" r="10"/><circle cx="120" cy="220" r="10"/><circle cx="180" cy="220" r="10"/><circle cx="240" cy="220" r="10"/><circle cx="300" cy="220" r="10"/>
+    <circle cx="30" cy="260" r="10"/><circle cx="90" cy="260" r="10"/><circle cx="150" cy="260" r="10"/><circle cx="210" cy="260" r="10"/><circle cx="270" cy="260" r="10"/><circle cx="330" cy="260" r="10"/>
+  </g>
+</svg>

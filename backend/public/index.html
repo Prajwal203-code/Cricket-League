@@ -1,0 +1,2182 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cricket League — Ultimate Real-time 3D Game</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Barlow:ital,wght@0,400;0,600;0,700;0,800;0,900;1,800;1,900&family=Teko:wght@600;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=6.0">
+    <!-- Official Google Identity Services SDK -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <!-- Official Facebook JavaScript SDK -->
+    <script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>
+    <!-- Three.js WebGL 3D Engine + GLTF Loader + Room Environment (IBL) -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/environments/RoomEnvironment.js"></script>
+</head>
+
+<body>
+    <div class="mobile-frame">
+        <!-- Persistent Top Header HUD -->
+        <header class="app-header" id="appHeader">
+            <div class="header-left">
+                <div class="avatar-frame" id="headerAvatarBtn" style="cursor: pointer;">
+                    <div class="avatar-img">👤</div>
+                    <div class="level-star-badge" id="hudPlayerLevel">⭐ 1</div>
+                </div>
+                <button class="settings-btn" id="settingsBtn" title="Settings">⚙️</button>
+            </div>
+            <div class="header-right">
+                <div class="currency-pill gems-pill" id="gemsPill">
+                    <div class="gem-icon-svg">💎</div>
+                    <span class="currency-amount" id="hudGems">10</span>
+                    <button class="add-btn green-plus">+</button>
+                </div>
+                <div class="currency-pill coins-pill" id="coinsPill">
+                    <div class="coin-icon-svg">🪙</div>
+                    <span class="currency-amount" id="hudCoins">200</span>
+                    <button class="add-btn green-plus">+</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Viewport containing all Screens -->
+        <main class="screens-container" id="screensContainer">
+
+            <!-- Screen 1: Splash Screen -->
+            <section class="screen-panel" id="screen-splash">
+                <div class="splash-stadium-bg"></div>
+                <div class="splash-center">
+                    <div class="splash-logo-container">
+                        <div class="ball-glow"></div>
+                        <div class="spinning-3d-ball">🏏</div>
+                    </div>
+                    <h1 class="game-logo-text">CRICKET LEAGUE</h1>
+                    <div class="splash-bar-outer">
+                        <div class="splash-bar-fill" id="splashBarFill"></div>
+                    </div>
+                    <div class="splash-tip" id="splashTip">Loading Stadium Assets & Pitch...</div>
+                </div>
+            </section>
+
+            <!-- Screen 2: Home Screen -->
+            <section class="screen-panel hidden" id="screen-home">
+                <!-- Stadium Background -->
+                <div class="stadium-sky-backdrop">
+                    <div class="stadium-stands"></div>
+                    <div class="floodlights light-left"></div>
+                    <div class="floodlights light-right"></div>
+                    <div class="stadium-ground"></div>
+                </div>
+
+                <!-- Left Floating Quick Action Badges -->
+                <div class="floating-column left-column">
+                    <div class="badge-widget tour-progress-widget" id="homeTourProgressWidget" style="cursor: pointer;">
+                        <div class="widget-title">Cricket World Tour</div>
+                        <div class="tour-meter-bar">
+                            <div class="tour-meter-fill" id="homeXpFill" style="width: 0%;">0/50</div>
+                            <div class="tour-bonus-num" id="homeNextRewardTag">⭐ 2</div>
+                        </div>
+                    </div>
+
+                    <div class="banner-action-widget pass-gold-card" id="homeBattlePassWidget"
+                        style="cursor: pointer; margin-top: 6px;">
+                        <div class="banner-icon">🎟️</div>
+                        <div class="banner-text">STRIKE<br>PASS</div>
+                        <span class="widget-badge-count pass-tier-badge" id="homePassTierTag">T7</span>
+                    </div>
+
+                    <div class="banner-action-widget streak-blue-card" id="homeDailyStreakWidget"
+                        style="cursor: pointer; margin-top: 6px;">
+                        <div class="banner-icon">📅</div>
+                        <div class="banner-text">DAILY<br>STREAK</div>
+                        <span class="widget-badge-count orange-badge" id="homeStreakBadge">!</span>
+                    </div>
+
+                    <div class="banner-action-widget duel-red-card" id="homeCustomRoomWidget"
+                        style="cursor: pointer; margin-top: 6px;">
+                        <div class="banner-icon">⚔️</div>
+                        <div class="banner-text">1v1<br>ROOM</div>
+                    </div>
+                </div>
+
+                <!-- Right Floating Quick Action Badges -->
+                <div class="floating-column right-column">
+                    <div class="banner-action-widget yellow-card" id="freeCoinsWidget">
+                        <div class="banner-icon">🎁</div>
+                        <div class="banner-text">Free<br>Coins</div>
+                        <span class="widget-badge-count orange-badge">4</span>
+                    </div>
+
+                    <div class="banner-action-widget purple-card" id="challengesWidget">
+                        <div class="banner-icon">🎯</div>
+                        <div class="banner-text">Challenges</div>
+                        <div class="challenge-mini-bar">
+                            <div class="fill" style="width: 65%;"></div>
+                        </div>
+                    </div>
+
+                    <div class="round-action-widget friends-widget" id="friendsWidget" style="cursor: pointer;">
+                        <div class="action-icon"
+                            style="font-size: 20px; filter: drop-shadow(0 2px 6px rgba(168, 85, 247, 0.6));">👥</div>
+                        <span class="action-label">Friends</span>
+                        <span class="widget-badge-count purple-badge" id="friendsBadgeCount">1</span>
+                    </div>
+
+                    <div class="round-action-widget spin-win-widget" id="spinWinWidget" style="cursor: pointer;">
+                        <div class="action-icon"
+                            style="font-size: 20px; filter: drop-shadow(0 2px 6px rgba(245, 158, 11, 0.6)); animation: floatSlow 2.5s infinite ease-in-out;">
+                            🎡</div>
+                        <span class="action-label">Spin & Win</span>
+                        <span class="widget-badge-count green-badge" id="spinWidgetBadge">FREE</span>
+                    </div>
+
+                    <div class="offer-box-widget" id="offerWidget">
+                        <div class="offer-tag">OFFER</div>
+                        <div class="offer-avatar">👨‍🦱</div>
+                        <div class="offer-time">1w 1d</div>
+                    </div>
+                </div>
+
+                <!-- Center 3D Batsman Hero with Country Uniform -->
+                <div class="hero-character-stage" id="heroCharacterStage" title="Tap to swing!">
+                    <img src="images/players/hero_IN.jpg" class="hero-batsman-img" id="heroBatsmanImg"
+                        alt="3D Batsman Hero" />
+                    <div class="hero-character-aura"></div>
+                    <div class="practice-toast hidden" id="practiceToast">POWERFUL SHOT! 🏏</div>
+                </div>
+
+                <!-- Big Yellow "Play" CTA Button -->
+                <div class="play-button-wrapper">
+                    <button class="yellow-play-btn" id="homePlayBtn">
+                        <span class="play-text">Play</span>
+                        <div class="ball-half-graphic">
+                            <div class="seam-line"></div>
+                        </div>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Screen 3: Tour Selection & Matchmaking -->
+            <section class="screen-panel hidden" id="screen-matchmaking">
+                <div class="panel-header">
+                    <button class="back-circle-btn" id="tourBackBtn">←</button>
+                    <h2 class="panel-title">SELECT TOUR VENUE</h2>
+                </div>
+                <div class="tours-scroll-list" id="toursScrollList">
+                    <!-- Tours generated via JS -->
+                </div>
+
+                <!-- Matchmaking Live Search Overlay -->
+                <div class="matchmaking-modal hidden" id="matchSearchModal">
+                    <div class="modal-tour-badge" id="modalTourName">ADELAIDE - TOUR 3</div>
+                    <div class="versus-cards-row">
+                        <div class="versus-player-card">
+                            <div class="p-avatar">🇮🇳</div>
+                            <div class="p-name" id="matchmakingMyName">Player</div>
+                            <div class="p-rank">⭐30</div>
+                        </div>
+                        <div class="vs-pulsing-badge">VS</div>
+                        <div class="versus-player-card opponent-box" id="opponentSearchBox">
+                            <div class="p-avatar">❓</div>
+                            <div class="p-name">Searching...</div>
+                            <div class="p-rank">...</div>
+                        </div>
+                    </div>
+                    <div class="search-pulse-radar"></div>
+                    <p class="search-status-text" id="searchStatusMsg">Connecting with worldwide player...</p>
+                    <button class="cancel-search-btn" id="cancelMatchSearchBtn">Cancel Match</button>
+                </div>
+            </section>
+
+            <!-- Screen 4: Pre-Match Preview -->
+            <section class="screen-panel hidden" id="screen-prematch">
+                <div class="prematch-title-header">MATCH PREVIEW</div>
+
+                <!-- Opponent Card -->
+                <div class="prematch-card opponent-prematch-card">
+                    <div class="prematch-player-header">
+                        <div class="p-avatar-circle">🇵🇰</div>
+                        <div class="p-meta">
+                            <span class="p-name">Guest_434660435</span>
+                            <span class="p-rank-star">⭐ 32</span>
+                        </div>
+                    </div>
+                    <div class="bowlers-squad-row">
+                        <div class="mini-card-pill epic"><span class="pill-role">Fast</span> Ranveer
+                            <strong>Lv.4</strong>
+                        </div>
+                        <div class="mini-card-pill epic"><span class="pill-role">Fast</span> Joshua
+                            <strong>Lv.4</strong>
+                        </div>
+                        <div class="mini-card-pill common"><span class="pill-role">Spin</span> Wajid
+                            <strong>Lv.3</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="prematch-vs-badge">VS</div>
+
+                <!-- Local Player Card -->
+                <div class="prematch-card local-prematch-card">
+                    <div class="prematch-player-header">
+                        <div class="p-avatar-circle">🇮🇳</div>
+                        <div class="p-meta">
+                            <span class="p-name" id="prematchMyName">Player</span>
+                            <span class="p-rank-star">⭐ 30</span>
+                        </div>
+                    </div>
+                    <div class="active-batsman-display">
+                        <span class="rarity-badge-mini epic">Epic</span>
+                        <div class="batsman-stat-text">Virudh (Lv. 2 • Power 30)</div>
+                    </div>
+                    <div class="equipment-select-row">
+                        <button class="equip-btn active">Starter Bat (∞)</button>
+                        <button class="equip-btn">Star Bat (x6)</button>
+                    </div>
+                </div>
+
+                <div class="toss-announcement-pill" id="tossBanner">YOU BAT FIRST</div>
+                <div class="prematch-countdown-circle" id="prematchCountdown">3</div>
+            </section>
+
+            <!-- Screen 5, 6, 7: In-Match 3D Gameplay -->
+            <section class="screen-panel hidden" id="screen-match">
+                <!-- Top In-Match Scoreboard -->
+                <div class="match-top-hud">
+                    <button class="menu-hamb-btn">☰</button>
+
+                    <div class="match-player-side p1-hud-side">
+                        <div class="hud-avatar">🇮🇳</div>
+                        <span class="hud-player-name" id="hudMatchPlayerName">Player</span>
+                    </div>
+
+                    <div class="match-center-capsule">
+                        <div class="capsule-titles">
+                            <span>TOTAL RUNS</span>
+                            <span>TARGET</span>
+                        </div>
+                        <div class="capsule-scores">
+                            <span class="total-runs-val" id="matchP1Score">0</span>
+                            <span class="target-val" id="matchTargetVal">-</span>
+                        </div>
+                        <div class="balls-tracker-row">
+                            <div class="ball-slot-circle" id="bdot-0"></div>
+                            <div class="ball-slot-circle" id="bdot-1"></div>
+                            <div class="ball-slot-circle" id="bdot-2"></div>
+                            <div class="ball-slot-circle" id="bdot-3"></div>
+                            <div class="ball-slot-circle" id="bdot-4"></div>
+                            <div class="ball-slot-circle" id="bdot-5"></div>
+                        </div>
+                    </div>
+
+                    <div class="match-player-side p2-hud-side">
+                        <div class="hud-avatar opponent-avatar-timer">🇵🇰</div>
+                        <span class="hud-player-name">Guest_434660435</span>
+                    </div>
+                </div>
+
+                <!-- Live Gameplay Pitch Arena -->
+                <div class="inmatch-stadium-viewport">
+                    <!-- Top Left Radar -->
+                    <div class="field-radar-widget">
+                        <div class="radar-pitch-line"></div>
+                        <div class="radar-dot dot-1"></div>
+                        <div class="radar-dot dot-2"></div>
+                        <div class="radar-dot dot-3"></div>
+                        <div class="radar-dot dot-4"></div>
+                        <div class="radar-dot dot-5"></div>
+                    </div>
+
+                    <!-- Top Right Current Bowler Badge -->
+                    <div class="current-bowler-badge" id="currentBowlerBadge">
+                        <div class="bowler-avatar-head">🧔</div>
+                        <div class="bowler-info-col">
+                            <span class="bowler-name-label">Ranveer</span>
+                            <span class="bowler-type-label">Fast bowler ⚡</span>
+                        </div>
+                    </div>
+
+                    <!-- 3D Stadium Field & Pitch -->
+                    <div class="stadium-crowd-stands">
+                        <div class="ad-hoarding">CLOUD net • CORE NETWORK • ENERGY SPORT</div>
+                    </div>
+
+                    <div class="pitch-dirt-ground">
+                        <div class="bowling-stumps"></div>
+                        <div class="bowling-crease-line"></div>
+
+                        <!-- Animated Pitch Landing Ring -->
+                        <div class="pitch-target-rings" id="pitchTargetRings">
+                            <div class="ring ring-inner"></div>
+                            <div class="ring ring-outer"></div>
+                        </div>
+
+                        <!-- 3D Batsman Character -->
+                        <div class="inmatch-batsman" id="inmatchBatsman">
+                            <div class="batsman-aim-arrow" id="batsmanAimArrow"></div>
+                        </div>
+
+                        <div class="batting-crease-line"></div>
+                        <div class="batting-stumps-blue"></div>
+                    </div>
+
+                    <!-- Vertical Timing Bar (Left Edge) -->
+                    <div class="vertical-timing-meter" id="verticalTimingMeter">
+                        <div class="meter-label top-early">EARLY</div>
+                        <div class="meter-zone zone-red"></div>
+                        <div class="meter-zone zone-orange"></div>
+                        <div class="meter-zone zone-green"></div>
+                        <div class="meter-zone zone-cyan-perfect"></div>
+                        <div class="meter-zone zone-green"></div>
+                        <div class="meter-zone zone-orange"></div>
+                        <div class="meter-zone zone-red"></div>
+                        <div class="meter-label bottom-late">LATE</div>
+                        <div class="timing-needle" id="verticalTimingNeedle"></div>
+                    </div>
+
+                    <!-- Center Hit Feedback Popup -->
+                    <div class="shot-popup-center hidden" id="shotFeedbackPopup">PERFECT!</div>
+
+                    <!-- Bottom Stance Slider -->
+                    <div class="stance-slider-bar">
+                        <span>◄</span>
+                        <div class="slider-thumb">◯</div>
+                        <span>►</span>
+                    </div>
+
+                    <!-- In-Match Floating Emote Button (Free Fire Emote Wheel) -->
+                    <button class="match-emote-floating-btn" id="matchEmoteBtn" title="Taunt / Emote">🎭</button>
+
+                    <!-- Live Animated Emote Bubble Display -->
+                    <div class="match-emote-bubble hidden" id="matchEmoteBubble"></div>
+                </div>
+
+                <!-- Interactive Swipe / Shot Control Buttons (Bottom) -->
+                <div class="inmatch-control-deck" id="inmatchControlDeck">
+                    <div class="shots-horizontal-selector">
+                        <button class="shot-action-btn" data-shot="Loft">▲ LOFT</button>
+                        <button class="shot-action-btn" data-shot="Cover">COVER ►</button>
+                        <button class="shot-action-btn" data-shot="Straight">▼ STRAIGHT</button>
+                        <button class="shot-action-btn" data-shot="Leg">◄ LEG</button>
+                        <button class="shot-action-btn" data-shot="Defensive">● DEFEND</button>
+                    </div>
+                </div>
+
+                <!-- Screen 7: Celebratory Banner -->
+                <div class="celebration-overlay hidden" id="celebrationOverlay">
+                    <div class="celebration-badge" id="celebBadge">6</div>
+                    <div class="celebration-subtitle" id="celebSubtitle">MAXIMUM SIX!</div>
+                </div>
+            </section>
+
+            <!-- Screen 8: Match Summary & Rewards -->
+            <section class="screen-panel hidden" id="screen-result">
+                <div class="result-victory-container">
+                    <!-- Challenge Milestone Strip -->
+                    <div class="result-challenge-strip">
+                        <div class="challenge-strip-title">🎯 Challenge: Earn 500,000 coins</div>
+                        <div class="challenge-progress-track">
+                            <div class="progress-fill" style="width: 54%;"></div>
+                            <span class="progress-label">255,700 / 500,000</span>
+                        </div>
+                    </div>
+
+                    <!-- Winner Crown & Headline -->
+                    <div class="victory-header-center">
+                        <div class="winner-crown-3d">👑</div>
+                        <h1 class="winner-headline-text" id="winnerHeadline">YOU WIN!</h1>
+                    </div>
+
+                    <!-- Versus Scorecards Row -->
+                    <div class="result-scorecards-grid">
+                        <!-- P1 Card -->
+                        <div class="result-player-card card-winner" id="resultP1Card">
+                            <div class="card-winner-badge">WINNER</div>
+                            <div class="res-avatar">🇮🇳</div>
+                            <div class="res-name" id="matchResMyName">Player</div>
+                            <div class="res-star">⭐ 30</div>
+                            <div class="res-big-score" id="summaryP1Score">28</div>
+                            <span class="res-runs-tag">RUNS</span>
+                        </div>
+
+                        <!-- P2 Card -->
+                        <div class="result-player-card card-loser" id="resultP2Card">
+                            <div class="res-avatar">🇵🇰</div>
+                            <div class="res-name">Guest_434660</div>
+                            <div class="res-star">⭐ 32</div>
+                            <div class="res-big-score" id="summaryP2Score">23</div>
+                            <span class="res-runs-tag">RUNS</span>
+                        </div>
+                    </div>
+
+                    <!-- Prize Payout Banner -->
+                    <div class="victory-payout-card" id="payoutNotification">
+                        <div class="payout-title">TOUR PRIZE COLLECTED</div>
+                        <div class="payout-rewards-row">
+                            <div class="payout-pill"><span class="p-icon">🪙</span> +200 Coins</div>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="result-actions-column">
+                        <button class="gold-continue-btn" id="resultContinueBtn">CONTINUE</button>
+                        <button class="rematch-btn" id="resultRematchBtn">REMATCH</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Screen: Full-Screen Level Roadmap (Levels 1 - 50+ & Infinite Progression) -->
+            <section class="screen-panel hidden" id="screen-roadmap">
+                <div class="panel-header roadmap-header">
+                    <button class="back-circle-btn" id="roadmapBackBtn">←</button>
+                    <h2 class="panel-title">LEVEL ROADMAP</h2>
+                    <button class="roadmap-jump-btn" id="roadmapJumpBtn" title="Jump to Current Level">🎯 MY
+                        LEVEL</button>
+                </div>
+
+                <!-- Sticky Hero Progression Banner -->
+                <div class="roadmap-hero-card">
+                    <div class="roadmap-hero-top">
+                        <div class="roadmap-star-badge" id="roadmapHeroLevel">⭐ 1</div>
+                        <div class="roadmap-hero-info">
+                            <div class="roadmap-hero-title">Level Progression Road</div>
+                            <div class="roadmap-xp-text" id="roadmapHeroXpText">0 / 50 XP</div>
+                        </div>
+                    </div>
+                    <div class="roadmap-hero-bar-outer">
+                        <div class="roadmap-hero-bar-fill" id="roadmapHeroXpFill" style="width: 0%;"></div>
+                    </div>
+                    <div class="roadmap-stats-strip">
+                        <span>🎁 Claimed: <strong id="roadmapTotalClaimedVal">0</strong> Milestones</span>
+                        <span>⚡ Next Goal: <strong id="roadmapNextRewardVal">Level 2</strong></span>
+                    </div>
+                </div>
+
+                <!-- Vertical Milestone Road Track -->
+                <div class="roadmap-scroll-container" id="roadmapScrollContainer">
+                    <div class="roadmap-track-spine"></div>
+                    <div class="roadmap-nodes-list" id="roadmapNodesList">
+                        <div class="roadmap-loading">Loading Level Roadmap...</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Screen: Strike Battle Pass (Free Fire Elite Pass) -->
+            <section class="screen-panel hidden" id="screen-battlepass">
+                <div class="panel-header battlepass-header">
+                    <button class="back-circle-btn" id="battlepassBackBtn">←</button>
+                    <h2 class="panel-title">STRIKE BATTLE PASS</h2>
+                    <button class="header-action-pill-btn gold-upgrade-btn" id="upgradeElitePassBtn">👑 ELITE
+                        PASS</button>
+                </div>
+
+                <!-- Season Pass Hero Banner -->
+                <div class="battlepass-hero-card">
+                    <div class="pass-hero-top">
+                        <div class="pass-badge-box">
+                            <span class="pass-tier-num" id="passHeroTierVal">TIER 7</span>
+                            <span class="pass-season-label">SEASON 1</span>
+                        </div>
+                        <div class="pass-info-box">
+                            <div class="pass-title-line">
+                                <h3>STRIKE ROYALE 🔥</h3>
+                                <span class="pass-status-pill" id="passStatusPill">FREE PASS</span>
+                            </div>
+                            <div class="pass-tokens-text" id="passTokensText">380 / 400 Pass Tokens</div>
+                        </div>
+                    </div>
+                    <div class="pass-progress-bar-outer">
+                        <div class="pass-progress-bar-fill" id="passProgressFill" style="width: 25%;"></div>
+                    </div>
+                </div>
+
+                <!-- Pass Sub-Tabs: Tiers Track & Missions -->
+                <div class="segment-tabs-row" style="margin-top: 6px;">
+                    <button class="segment-btn active" id="tabPassTiers">🎟️ Pass Tiers</button>
+                    <button class="segment-btn" id="tabPassMissions">🎯 Daily Missions</button>
+                </div>
+
+                <!-- SUB-PANEL 1: Dual-Track Tiers List (Free & Premium) -->
+                <div class="pass-subview" id="viewPassTiers">
+                    <div class="pass-tracks-scroll-list" id="passTiersScrollList">
+                        <!-- Rendered by JS -->
+                    </div>
+                </div>
+
+                <!-- SUB-PANEL 2: Pass Missions -->
+                <div class="pass-subview hidden" id="viewPassMissions">
+                    <div class="pass-missions-list" id="passMissionsList">
+                        <!-- Rendered by JS -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Screen 9: Leaderboard -->
+            <section class="screen-panel hidden" id="screen-leaderboard">
+                <div class="panel-header">
+                    <button class="back-circle-btn" id="leaderboardBackBtn">←</button>
+                    <h2 class="panel-title">LEADERBOARD</h2>
+                </div>
+
+                <div class="segment-tabs-row">
+                    <button class="segment-btn" id="lbAllTimeTab">All Time</button>
+                    <button class="segment-btn active" id="lbCountryTab">Country</button>
+                    <button class="segment-btn" id="lbWorldTab">World</button>
+                </div>
+
+                <!-- Season Countdown Banner -->
+                <div class="season-countdown-card">
+                    <div class="season-title">
+                        <span class="season-title-scope" id="seasonScopeTitle">🇮🇳 India</span>
+                        <span class="season-clock-wrap">Ends in: <strong class="season-clock"
+                                id="seasonCountdownClock">—</strong></span>
+                    </div>
+                    <div class="prize-pool-row">
+                        <div class="prize-pill first-prize">
+                            <span class="prize-rank">1st 🥇</span>
+                            <span class="prize-gem">1,500 💎</span>
+                        </div>
+                        <div class="prize-pill second-prize">
+                            <span class="prize-rank">2nd 🥈</span>
+                            <span class="prize-gem">1,000 💎</span>
+                        </div>
+                        <div class="prize-pill top10-prize">
+                            <span class="prize-rank">3-10th 🥉</span>
+                            <span class="prize-gem">500 💎</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Leaderboard Player Rows List (Dynamic from MySQL) -->
+                <div class="leaderboard-scroll-list" id="leaderboardScrollList">
+                    <div style="color: #a0aec0; text-align: center; padding: 24px;">Loading leaderboard rankings...
+                    </div>
+                </div>
+
+
+
+            </section>
+
+            <!-- Screen: Clubs (Dynamic Real-Time MySQL Club Hub) -->
+            <section class="screen-panel hidden" id="screen-clubs">
+                <div class="panel-header">
+                    <button class="back-circle-btn" id="clubsBackBtn">←</button>
+                    <h2 class="panel-title" id="clubScreenHeaderTitle">MY CLUB</h2>
+                    <button class="header-action-pill-btn" id="openCreateClubBtn">+ CREATE</button>
+                </div>
+
+                <!-- STATE 1: GUEST LOCK VIEW (Visible for Guest Players) -->
+                <div class="friends-guest-lock-card hidden" id="clubsGuestLockView">
+                    <div class="guest-lock-glow-icon">🛡️🔒</div>
+                    <h3 class="guest-lock-title">SIGN IN TO ACCESS CLUBS</h3>
+                    <p class="guest-lock-desc">
+                        Guest players cannot join or create Clubs. Sign in with <strong>Google Play Games</strong> or
+                        <strong>Facebook</strong> to unlock Clubs, request cards, donate & win Weekly Club Mega Chests!
+                    </p>
+
+                    <div class="social-signin-actions-col">
+                        <button class="social-auth-cta-btn google-btn" id="clubsGoogleSignInBtn">
+                            <span class="btn-brand-icon">🎮</span> Sign in with Google Play Games
+                        </button>
+                        <button class="social-auth-cta-btn facebook-btn" id="clubsFacebookSignInBtn">
+                            <span class="btn-brand-icon">🇫</span> Sign in with Facebook
+                        </button>
+                    </div>
+
+                    <div class="guest-lock-perks-row">
+                        <div class="perk-tag">🛡️ Join & Create Squads</div>
+                        <div class="perk-tag">🃏 Request & Donate Cards</div>
+                        <div class="perk-tag">🎁 Weekly Mega Chests</div>
+                    </div>
+                </div>
+
+                <!-- STATE 2: CONNECTED VIEW (Visible when signed in with Google or Facebook) -->
+                <div class="clubs-connected-wrapper" id="clubsConnectedView">
+                    <!-- My Active Club Hero Header -->
+                    <div class="my-active-club-container" id="myActiveClubSection">
+                        <div class="club-hero-card" id="myClubHeroCard">
+                            <div class="club-hero-top-row">
+                                <div class="club-shield-wrap">
+                                    <div class="club-shield" id="myClubBadge">🎯</div>
+                                    <span class="club-level-pill" id="myClubLevelPill">Lv. 3</span>
+                                </div>
+                                <div class="club-hero-titles">
+                                    <div class="club-title-line">
+                                        <h3 id="myClubTitle">—</h3>
+                                        <span class="club-tag-badge" id="myClubTag">#CLUB</span>
+                                    </div>
+                                    <p class="club-desc" id="myClubDesc">Loading club information...</p>
+                                </div>
+                            </div>
+
+                            <div class="club-stats-row">
+                                <div class="club-stat-box">
+                                    <span class="stat-label">MEMBERS</span>
+                                    <span class="stat-value" id="myClubMembers">4/50</span>
+                                </div>
+                                <div class="club-stat-box">
+                                    <span class="stat-label">TROPHIES</span>
+                                    <span class="stat-value" id="myClubTrophies">3,015 🏆</span>
+                                </div>
+                                <div class="club-stat-box">
+                                    <span class="stat-label">YOUR ROLE</span>
+                                    <span class="stat-value role-gold" id="myClubRoleTag">LEADER 👑</span>
+                                </div>
+                            </div>
+
+                            <div class="club-actions-row">
+                                <button class="club-leave-btn" id="clubLeaveBtn">LEAVE CLUB</button>
+                                <button class="club-friendly-match-btn" id="clubFriendlyMatchBtn">⚔️ FRIENDLY
+                                    MATCH</button>
+                                <button class="club-request-card-btn" id="openRequestCardBtn">+ REQUEST CARDS</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Club Navigation Sub-Tabs (Smooth Horizontal Glass Pill Bar) -->
+                    <div class="club-nav-pill-bar" style="margin-top: 10px;">
+                        <button class="club-pill-tab active" id="clubTabChat">💬 Chat & Cards</button>
+                        <button class="club-pill-tab" id="clubTabRoster">👥 Members</button>
+                        <button class="club-pill-tab" id="clubTabWars">⚔️ Wars</button>
+                        <button class="club-pill-tab" id="clubTabChest">🏆 Chest</button>
+                        <button class="club-pill-tab hidden" id="clubTabRequests">📝 Requests <span
+                                class="requests-badge-pill" id="clubRequestsCount">0</span></button>
+                        <button class="club-pill-tab" id="clubTabBrowse">🔍 Browse</button>
+                    </div>
+
+                    <!-- SUB-PANEL 1: Club Chat & Activity Feed -->
+                    <div class="club-subview" id="clubViewChat">
+                        <div class="club-chat-messages-container" id="clubChatMessagesList">
+                            <!-- Chat messages & Card Requests rendered here -->
+                        </div>
+
+                        <!-- Chat Input Deck -->
+                        <div class="club-chat-input-bar">
+                            <input type="text" id="clubChatInput" placeholder="Send message to club..."
+                                maxlength="120" />
+                            <button id="clubChatSendBtn">➤</button>
+                        </div>
+                    </div>
+
+                    <!-- SUB-PANEL 2: Club Members Roster -->
+                    <div class="club-subview hidden" id="clubViewRoster">
+                        <div class="roster-list-container" id="clubRosterList">
+                            <!-- Members rendered here from MySQL -->
+                        </div>
+                    </div>
+
+                    <!-- SUB-PANEL 2B: Pending Join Requests (Leader View) -->
+                    <div class="club-subview hidden" id="clubViewRequests">
+                        <div class="roster-list-container" id="clubRequestsList">
+                            <!-- Requests rendered here from MySQL -->
+                        </div>
+                    </div>
+
+                    <!-- SUB-PANEL 2C: Weekend Club Wars (Free Fire Dog Tags) -->
+                    <div class="club-subview hidden" id="clubViewWars">
+                        <div class="club-war-hero-card">
+                            <div class="war-hero-header">
+                                <span class="war-title">⚔️ WEEKEND GUILD GLORY</span>
+                                <span class="war-timer" id="clubWarTimer">2d 14h left</span>
+                            </div>
+                            <div class="war-my-score-strip" id="clubWarMyScoreStrip">
+                                <span>🛡️ Club Dog Tags: <strong id="myClubDogTagsVal">0</strong></span>
+                                <span>Rank: <strong id="myClubWarRankVal">#1</strong></span>
+                            </div>
+                            <div class="war-bonus-pill">🔥 Win 1v1 Matches to earn +10 Dog Tags per victory!</div>
+                        </div>
+
+                        <div class="war-leaderboard-header">
+                            <span style="font-size:12px; font-weight:800; color:#fff;">GLOBAL SQUAD RANKINGS</span>
+                            <span class="prize-tag" style="font-size:11px; color:#facc15; font-weight:900;">50,000 💎
+                                Prize Pool</span>
+                        </div>
+                        <div class="war-leaderboard-list" id="clubWarLeaderboardList">
+                            <!-- Dynamically rendered from MySQL -->
+                        </div>
+                    </div>
+
+                    <!-- SUB-PANEL 3: Weekly Club Mega Chest -->
+                    <div class="club-subview hidden" id="clubViewChest">
+                        <div class="club-chest-card">
+                            <div class="chest-icon-glow">📦✨</div>
+                            <h3 class="chest-title">WEEKLY CLUB MEGA CHEST</h3>
+                            <p class="chest-desc">Win matches & earn trophies with club members to unlock higher tiers!
+                            </p>
+
+                            <div class="chest-progress-box">
+                                <div class="chest-tier-badge" id="chestTierBadge">⭐ TIER 3 / 10</div>
+                                <div class="chest-progress-bar-wrap">
+                                    <div class="chest-progress-fill" id="chestProgressFill" style="width: 58%;"></div>
+                                    <span class="chest-progress-label" id="chestProgressLabel">1,450 / 2,500 🏆</span>
+                                </div>
+                            </div>
+
+                            <div class="chest-rewards-preview">
+                                <div class="reward-pill"><span class="r-icon">🪙</span> <strong>+10,000 Coins</strong>
+                                </div>
+                                <div class="reward-pill"><span class="r-icon">💎</span> <strong>+100 Gems</strong></div>
+                                <div class="reward-pill"><span class="r-icon">🃏</span> <strong>5x Rare Cards</strong>
+                                </div>
+                            </div>
+
+                            <button class="claim-chest-btn" id="claimClubChestBtn">CLAIM CHEST REWARDS</button>
+                        </div>
+                    </div>
+
+                    <!-- SUB-PANEL 4: Browse & Search Clubs -->
+                    <div class="club-subview hidden" id="clubViewBrowse">
+                        <div class="clubs-search-bar-wrap">
+                            <input type="text" id="clubSearchInput" placeholder="Search clubs by name..." />
+                        </div>
+                        <div class="clubs-scroll-list" id="clubsScrollList">
+                            <!-- Dynamic from MySQL -->
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Club Member Action Modal (Promote / Demote / Kick / Transfer Leadership) -->
+            <div class="modal-overlay hidden" id="clubMemberActionModal">
+                <div class="esports-modal-card" style="max-width: 360px;">
+                    <div class="esports-modal-header">
+                        <div class="header-icon-badge" id="memberActionAvatar">👤</div>
+                        <div class="header-title-box">
+                            <h3 id="memberActionUsername">Player</h3>
+                            <span class="header-subtitle" id="memberActionMeta">Role: Member • 1,200 🏆</span>
+                        </div>
+                        <button class="esports-close-btn" id="closeMemberActionModal" aria-label="Close">✕</button>
+                    </div>
+                    <div class="modal-body" style="padding: 16px; display: flex; flex-direction: column; gap: 10px;">
+                        <button class="modal-action-btn role-promote-btn" id="btnPromoteCoLeader">🥈 Promote to
+                            Co-Leader</button>
+                        <button class="modal-action-btn role-promote-btn" id="btnPromoteElder">🥉 Promote to
+                            Elder</button>
+                        <button class="modal-action-btn role-demote-btn" id="btnDemoteMember">👤 Demote Member</button>
+                        <button class="modal-action-btn role-transfer-btn" id="btnTransferLeadership">👑 Transfer
+                            Leadership</button>
+                        <button class="modal-action-btn role-kick-btn" id="btnKickMember">👢 Kick from Club</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Card Request Modal -->
+            <div class="modal-overlay hidden" id="requestCardModal">
+                <div class="esports-modal-card">
+                    <div class="esports-modal-header">
+                        <div class="header-icon-badge">🏏</div>
+                        <div class="header-title-box">
+                            <h3>REQUEST SQUAD CARDS</h3>
+                            <span class="header-subtitle">Request up to 5 copies from club members</span>
+                        </div>
+                        <button class="esports-close-btn" id="closeRequestCardModal" aria-label="Close">✕</button>
+                    </div>
+                    <div class="request-cards-select-list" id="requestCardsSelectList">
+                        <!-- Rendered by JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Create Club Modal -->
+            <div class="modal-overlay hidden" id="createClubModal">
+                <div class="esports-modal-card">
+                    <div class="esports-modal-header">
+                        <div class="header-icon-badge">🛡️</div>
+                        <div class="header-title-box">
+                            <h3>CREATE CRICKET CLUB</h3>
+                            <span class="header-subtitle">Build your squad & compete in Club Leagues</span>
+                        </div>
+                        <button class="esports-close-btn" id="closeCreateClubModal" aria-label="Close">✕</button>
+                    </div>
+
+                    <div class="create-club-form">
+                        <div class="form-group">
+                            <label class="esports-form-label">
+                                <span class="label-icon">✍️</span> CLUB NAME
+                            </label>
+                            <input type="text" id="newClubName" class="esports-input"
+                                placeholder="e.g. Bangalore Strikers" maxlength="25" autocomplete="off" />
+                        </div>
+
+                        <div class="form-group">
+                            <label class="esports-form-label">
+                                <span class="label-icon">🎖️</span> BADGE SHIELD
+                            </label>
+                            <div class="badge-picker-row" id="badgePickerRow">
+                                <button class="badge-opt active" data-badge="🛡️" type="button"><span
+                                        class="badge-emoji">🛡️</span></button>
+                                <button class="badge-opt" data-badge="👑" type="button"><span
+                                        class="badge-emoji">👑</span></button>
+                                <button class="badge-opt" data-badge="⚡" type="button"><span
+                                        class="badge-emoji">⚡</span></button>
+                                <button class="badge-opt" data-badge="🎯" type="button"><span
+                                        class="badge-emoji">🎯</span></button>
+                                <button class="badge-opt" data-badge="🦁" type="button"><span
+                                        class="badge-emoji">🦁</span></button>
+                                <button class="badge-opt" data-badge="🔥" type="button"><span
+                                        class="badge-emoji">🔥</span></button>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="esports-form-label">
+                                <span class="label-icon">🏆</span> REQUIRED TROPHIES
+                            </label>
+                            <input type="hidden" id="newClubMinTrophies" value="0" />
+                            <div class="custom-gaming-dropdown" id="trophiesCustomDropdown">
+                                <div class="dropdown-trigger" id="trophiesDropdownTrigger" tabindex="0">
+                                    <div class="trigger-left">
+                                        <span class="trigger-tier-icon" id="triggerTierIcon">🥉</span>
+                                        <span class="trigger-text" id="triggerText">0 🏆</span>
+                                        <span class="trigger-pill pill-green" id="triggerPill">OPEN FOR ALL</span>
+                                    </div>
+                                    <span class="trigger-arrow" id="triggerArrow">▼</span>
+                                </div>
+                                <div class="dropdown-menu-list hidden" id="trophiesDropdownMenu">
+                                    <div class="dropdown-option-item active" data-value="0" data-icon="🥉"
+                                        data-text="0 🏆" data-pill="OPEN FOR ALL" data-pill-class="pill-green">
+                                        <div class="opt-left">
+                                            <span class="opt-tier-icon">🥉</span>
+                                            <div class="opt-info">
+                                                <span class="opt-val">0 🏆</span>
+                                                <span class="opt-desc">Open for all active strikers</span>
+                                            </div>
+                                        </div>
+                                        <span class="opt-pill pill-green">OPEN</span>
+                                        <span class="opt-check">✓</span>
+                                    </div>
+                                    <div class="dropdown-option-item" data-value="200" data-icon="🥈"
+                                        data-text="200+ 🏆" data-pill="BEGINNER" data-pill-class="pill-blue">
+                                        <div class="opt-left">
+                                            <span class="opt-tier-icon">🥈</span>
+                                            <div class="opt-info">
+                                                <span class="opt-val">200+ 🏆</span>
+                                                <span class="opt-desc">Beginner League strikers</span>
+                                            </div>
+                                        </div>
+                                        <span class="opt-pill pill-blue">BEGINNER</span>
+                                        <span class="opt-check">✓</span>
+                                    </div>
+                                    <div class="dropdown-option-item" data-value="500" data-icon="🥇"
+                                        data-text="500+ 🏆" data-pill="INTERMEDIATE" data-pill-class="pill-purple">
+                                        <div class="opt-left">
+                                            <span class="opt-tier-icon">🥇</span>
+                                            <div class="opt-info">
+                                                <span class="opt-val">500+ 🏆</span>
+                                                <span class="opt-desc">Intermediate & Tournaments</span>
+                                            </div>
+                                        </div>
+                                        <span class="opt-pill pill-purple">INTERMEDIATE</span>
+                                        <span class="opt-check">✓</span>
+                                    </div>
+                                    <div class="dropdown-option-item" data-value="1000" data-icon="👑"
+                                        data-text="1,000+ 🏆" data-pill="CHAMPIONSHIP" data-pill-class="pill-gold">
+                                        <div class="opt-left">
+                                            <span class="opt-tier-icon">👑</span>
+                                            <div class="opt-info">
+                                                <span class="opt-val">1,000+ 🏆</span>
+                                                <span class="opt-desc">Championship & High Rollers</span>
+                                            </div>
+                                        </div>
+                                        <span class="opt-pill pill-gold">CHAMPIONSHIP</span>
+                                        <span class="opt-check">✓</span>
+                                    </div>
+                                    <div class="dropdown-option-item" data-value="2000" data-icon="💎"
+                                        data-text="2,000+ 🏆" data-pill="MASTER TIER" data-pill-class="pill-cyan">
+                                        <div class="opt-left">
+                                            <span class="opt-tier-icon">💎</span>
+                                            <div class="opt-info">
+                                                <span class="opt-val">2,000+ 🏆</span>
+                                                <span class="opt-desc">Elite Virtuoso & Masters</span>
+                                            </div>
+                                        </div>
+                                        <span class="opt-pill pill-cyan">MASTER</span>
+                                        <span class="opt-check">✓</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="esports-form-label">
+                                <span class="label-icon">📝</span> CLUB MOTTO / DESCRIPTION
+                            </label>
+                            <input type="text" id="newClubDesc" class="esports-input"
+                                placeholder="Active daily striker club aiming for mega chest!" maxlength="80"
+                                autocomplete="off" />
+                        </div>
+
+                        <button class="esports-confirm-btn" id="confirmCreateClubBtn" type="button">
+                            <span class="btn-text">CREATE CLUB</span>
+                            <span class="btn-cost-tag"><span class="cost-val">5,000</span> 🪙</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Screen 10: Team Management -->
+            <section class="screen-panel hidden" id="screen-team">
+                <div class="panel-header">
+                    <button class="back-circle-btn" id="teamBackBtn">←</button>
+                    <h2 class="panel-title">SQUAD MANAGEMENT</h2>
+                </div>
+
+                <!-- Team Country & Overall Rating Banner -->
+                <div class="team-national-banner">
+                    <div class="team-banner-left">
+                        <div class="team-flag-emblem" id="teamCountryFlag">🇮🇳</div>
+                        <div class="team-info-col">
+                            <div class="team-country-name" id="teamCountryName">Team India</div>
+                            <div class="team-type-tag" id="teamCountryTypeTag">Major Cricket Nation</div>
+                        </div>
+                    </div>
+                    <div class="team-banner-right">
+                        <div class="team-ovr-box">
+                            <span class="ovr-label">TEAM PWR</span>
+                            <span class="ovr-value" id="teamOverallPower">380</span>
+                        </div>
+                        <button class="change-country-btn" id="openCountrySelectBtn" type="button">
+                            <span>Change Country</span>
+                            <span class="edit-icon">🌍</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="segment-tabs-row">
+                    <button class="segment-btn active" id="tabPlaying11">Starting 11</button>
+                    <button class="segment-btn" id="tabBowlers">Bowlers</button>
+                    <button class="segment-btn" id="tabBatsmen">Batsmen</button>
+                    <button class="segment-btn" id="tabBalls">Balls</button>
+                </div>
+
+                <!-- 1. Starting 11 Section (Default View) -->
+                <div class="starting11-container" id="sectionPlaying11">
+                    <div class="pitch-tactics-header">
+                        <div class="tactics-title-wrap">
+                            <span class="tactics-badge">PLAYING XI</span>
+                            <span class="tactics-subtitle">Match Lineup (Fixed 11 Roster)</span>
+                        </div>
+                        <div class="formation-pill">5 Bat • 2 AR • 4 Bowl</div>
+                    </div>
+
+                    <div class="playing11-pitch-grid" id="playing11Grid">
+                        <!-- Filled by JS with 11 Players in order #1 to #11 -->
+                    </div>
+                </div>
+
+                <!-- 2. Traditional Bowlers / Batsmen Views -->
+                <div class="traditional-squad-view hidden" id="sectionTraditionalSquad">
+                    <!-- My Team Pitch Section -->
+                    <div class="pitch-squad-section">
+                        <div class="squad-section-title" id="traditionalSectionTitle">Active Lineup</div>
+                        <div class="cards-stage-row" id="activeTeamRow">
+                            <!-- Filled by JS -->
+                        </div>
+                    </div>
+
+                    <!-- Upgrade Players Reward Bar -->
+                    <div class="reward-progress-strip">
+                        <div class="p-coin-icon">🅿️</div>
+                        <div class="strip-bar">
+                            <div class="fill" style="width: 0%;">0/50</div>
+                        </div>
+                        <div class="ruby-reward">💎</div>
+                        <span class="strip-label">Upgrade Players to Unlock Rewards!</span>
+                    </div>
+
+                    <!-- Reserve Section -->
+                    <div class="reserve-squad-section">
+                        <div class="squad-section-title">Reserve Cards</div>
+                        <div class="reserve-cards-grid" id="reserveGrid">
+                            <!-- Filled by JS -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. Ball Skins Inventory (Same page, inline tab content) -->
+                <div class="balls-inline-section hidden" id="sectionBalls">
+                    <div class="ball-collection-banner">
+                        <div class="collection-stats-header">
+                            <div class="stat-pill-box bought-pill-box" style="flex:1;">
+                                <span class="stat-lbl">YOUR BALLS</span>
+                                <span class="stat-val" id="boughtBallsCountTagInline">3 Available ⚽</span>
+                            </div>
+                        </div>
+                        <div class="collection-progress-bar">
+                            <div class="collection-fill" id="ownedBallsProgressFillInline" style="width: 27%;"></div>
+                        </div>
+                    </div>
+                    <div class="ball-skins-grid-view" id="ballSkinsGridViewInline">
+                        <!-- Populated via JS with owned ball cards -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Screen 11: Shop -->
+            <section class="screen-panel hidden" id="screen-shop">
+                <div class="panel-header">
+                    <button class="back-circle-btn" id="shopBackBtn">←</button>
+                    <h2 class="panel-title">SHOP</h2>
+                </div>
+
+                <!-- 1. Dedicated 3D Ball Skins Store Section (Featured at Top for Instant Visibility) -->
+                <div class="shop-balls-store-container" id="shopBallSkinsSection">
+                    <div class="shop-balls-header-strip">
+                        <div class="header-left">
+                            <div class="shop-header-icon-box">
+                                <span class="shop-ball-icon">⚽</span>
+                                <span class="shop-sparkle-icon">✨</span>
+                            </div>
+                            <div class="header-titles">
+                                <div class="shop-micro-tag">OFFICIAL MATCH SKINS</div>
+                                <h3>3D BALL SKINS STORE</h3>
+                                <p>Unlock Fireball, Ocean, Lightning & Cosmic Elemental Balls</p>
+                            </div>
+                        </div>
+                        <div class="shop-coin-badge">
+                            <span class="coin-icon">🪙</span>
+                            <span class="badge-text">COIN STORE</span>
+                        </div>
+                    </div>
+
+                    <div class="shop-ball-skins-grid" id="shopBallSkinsGrid">
+                        <!-- Filled by JS with 3D ball skin cards -->
+                    </div>
+                </div>
+
+                <!-- 2. Piggy Bank Box -->
+                <div class="piggy-bank-section-box">
+                    <div class="section-blue-title">PIGGY BANK</div>
+                    <div class="piggy-inner-card">
+                        <div class="piggy-card-header">You did it! You filled your piggy bank ℹ️</div>
+                        <div class="piggy-card-body">
+                            <div class="piggy-golden-character" id="piggyAnim">
+                                <div class="cowboy-hat">🤠</div>
+                                <div class="pig-emoji">🐷</div>
+                                <div class="full-badge-bar">
+                                    <span class="full-text">FULL</span>
+                                    <span class="tier-num">2</span>
+                                </div>
+                            </div>
+                            <div class="piggy-rewards-list">
+                                <div class="r-title">Rewards:</div>
+                                <div class="r-item"><span class="r-icon">💎</span> x385</div>
+                                <div class="r-item"><span class="r-icon">🪙</span> x4,000</div>
+                                <div class="r-item"><span class="r-icon">🃏</span> x2 Cards</div>
+                            </div>
+                        </div>
+                        <button class="green-price-btn break-piggy-btn" id="breakPiggyBtn">
+                            Open Now<br><span class="gem-cost">350 💎</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 3. Featured Pack: Epic Bowler Pack -->
+                <div class="featured-bundle-card">
+                    <div class="bundle-top-banner">
+                        <span class="bundle-title">Epic Bowler Pack</span>
+                        <span class="ads-pill">ADS</span>
+                    </div>
+                    <div class="bundle-items-display">
+                        <div class="bundle-col">
+                            <div class="item-visual-stack">🪙🪙🪙</div>
+                            <div class="item-name">20,000<br>Coins</div>
+                        </div>
+                        <div class="plus-sign">+</div>
+                        <div class="bundle-col card-col">
+                            <div class="card-avatar-box epic-glow">
+                                <span class="rarity-badge-mini">Epic</span>
+                                <div class="avatar-head">👨‍🦱</div>
+                            </div>
+                            <div class="item-name">x1 Mike ℹ️</div>
+                        </div>
+                        <div class="plus-sign">+</div>
+                        <div class="bundle-col">
+                            <div class="item-visual-stack">💎💎💎</div>
+                            <div class="item-name">200<br>Gems</div>
+                        </div>
+                    </div>
+                    <div class="bundle-action-row">
+                        <div class="value-flag">2X VALUE!</div>
+                        <button class="green-price-btn" id="buyFeaturedPackBtn">₹199.00</button>
+                        <div class="timer-tag">Ends in:<br><strong>1w 1d</strong></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Screen 12: Ball Skins -->
+            <section class="screen-panel hidden" id="screen-balls">
+                <div class="panel-header">
+                    <button class="back-circle-btn" id="ballsBackBtn">←</button>
+                    <h2 class="panel-title">BALL SKINS</h2>
+                </div>
+                <div class="segment-tabs-row">
+                    <button class="segment-btn" id="tabBowlersFromBalls">Bowlers</button>
+                    <button class="segment-btn" id="tabBatsmenFromBalls">Batsmen</button>
+                    <button class="segment-btn active">Balls</button>
+                </div>
+                <div class="ball-collection-banner">
+                    <div class="collection-stats-header">
+                        <div class="stat-pill-box bought-pill-box" style="flex:1;">
+                            <span class="stat-lbl">YOUR BALLS</span>
+                            <span class="stat-val" id="boughtBallsCountTag">3 Available ⚽</span>
+                        </div>
+                    </div>
+                    <div class="collection-progress-bar">
+                        <div class="collection-fill" id="ownedBallsProgressFill" style="width: 27%;"></div>
+                    </div>
+                </div>
+                <div class="ball-skins-grid-view" id="ballSkinsGridView">
+                    <!-- Populated via JS -->
+                </div>
+            </section>
+
+            <!-- Screen 13: Friends & 1 vs 1 Matches (Guest Lock + Social Sign-In Enforced) -->
+            <section class="screen-panel hidden" id="screen-friends">
+                <div class="friends-panel-header">
+                    <div class="friends-header-left">
+                        <button class="back-circle-btn" id="friendsBackBtn">←</button>
+                        <h2 class="friends-main-title">Friends</h2>
+                    </div>
+                    <button class="friends-search-pill" id="friendsSearchToggleBtn">
+                        Search <span class="search-glass-icon">🔍</span>
+                    </button>
+                </div>
+
+                <!-- STATE 1: GUEST LOCK VIEW (Visible for Guest Players) -->
+                <div class="friends-guest-lock-card hidden" id="friendsGuestLockView">
+                    <div class="guest-lock-glow-icon">🎮🔒</div>
+                    <h3 class="guest-lock-title">CONNECT TO MAKE FRIENDS</h3>
+                    <p class="guest-lock-desc">
+                        Guest players cannot add friends or challenge friends to 1 VS 1 matches. Sign in with
+                        <strong>Google Play Games</strong> or <strong>Facebook</strong> to connect with friends, send
+                        daily coins & play together!
+                    </p>
+
+                    <div class="social-signin-actions-col">
+                        <button class="social-auth-cta-btn google-btn" id="guestGoogleSignInBtn">
+                            <span class="btn-brand-icon">🎮</span> Sign in with Google Play Games
+                        </button>
+                        <button class="social-auth-cta-btn facebook-btn" id="guestFacebookSignInBtn">
+                            <span class="btn-brand-icon">🇫</span> Sign in with Facebook
+                        </button>
+                    </div>
+
+                    <div class="guest-lock-perks-row">
+                        <div class="perk-tag">👥 1v1 Friend Matches</div>
+                        <div class="perk-tag">🎁 Daily Coin Gifts</div>
+                        <div class="perk-tag">☁️ Cloud Progress Save</div>
+                    </div>
+                </div>
+
+                <!-- STATE 2: CONNECTED VIEW (Visible when signed in with Google or Facebook) -->
+                <div class="friends-connected-wrapper" id="friendsConnectedView">
+                    <!-- Connected Account Status Strip -->
+                    <div class="auth-status-strip" id="authStatusStrip">
+                        <div class="auth-status-left">
+                            <span class="online-indicator">🟢</span>
+                            <span id="connectedAccountLabel">Connected</span>
+                        </div>
+                        <button class="switch-guest-btn" id="switchToGuestBtn">Switch to Guest</button>
+                    </div>
+
+                    <!-- Search / Add Friend Bar (Toggleable) -->
+                    <div class="friend-search-bar-row hidden" id="friendSearchBarRow">
+                        <input type="text" id="friendSearchInput" class="friend-search-input"
+                            placeholder="Search by name or Player ID...">
+                        <button class="friend-search-action-btn" id="sendFriendRequestBtn">Add Friend ➕</button>
+                    </div>
+
+                    <div class="friends-scroll-content" id="friendsScrollContent">
+                        <!-- Invite Friends Top Card -->
+                        <div class="invite-friends-banner-card">
+                            <div class="invite-card-title">Invite Friends</div>
+                            <div class="invite-buttons-row">
+                                <button class="invite-social-btn fb-btn" id="inviteFbBtn">
+                                    <span class="social-icon">🔵</span> Facebook
+                                </button>
+                                <button class="invite-social-btn wa-btn" id="inviteWaBtn">
+                                    <span class="social-icon">🟢</span> WhatsApp
+                                </button>
+                            </div>
+                            <div class="invite-reward-hint">
+                                Get <strong>1,500 <span class="coin-emoji">🪙</span></strong> for each friend who joins!
+                            </div>
+                        </div>
+
+                        <!-- Pending Friend Requests Section -->
+                        <div class="pending-requests-box" id="pendingRequestsBox">
+                            <div class="section-micro-label">PENDING FRIEND REQUESTS (<span
+                                    id="pendingReqCount">1</span>)</div>
+                            <div class="pending-requests-list" id="pendingRequestsList">
+                                <!-- Populated via JS -->
+                            </div>
+                        </div>
+
+                        <!-- Friends List Container -->
+                        <div class="active-friends-section-title">ONLINE FRIENDS</div>
+                        <div class="friends-list-container" id="friendsListContainer">
+                            <!-- Populated via JS with 1 VS 1 and Gift buttons -->
+                        </div>
+                    </div>
+
+                    <!-- Bottom Sticky Collect and Send to all Bar -->
+                    <div class="friends-bottom-sticky-bar">
+                        <button class="collect-send-all-btn" id="collectSendAllBtn">
+                            <span>Collect and Send to all</span>
+                            <span class="gift-box-icon">🎁</span>
+                            <span class="btn-bubble-count" id="sendAllBadgeCount">1</span>
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Realistic Foil Packet Tear & Card Reveal Modal -->
+            <div class="pack-opening-modal hidden" id="packOpeningModal">
+                <div class="pack-opening-stage" id="packOpeningStage">
+                    <!-- Stage 1: Pouch Tearing Stage -->
+                    <div class="packet-tear-container" id="packetTearContainer">
+                        <div class="packet-glow-rays"></div>
+                        <div class="deluxe-foil-packet" id="foilPacket">
+                            <div class="packet-top-strip" id="packetTopStrip">
+                                <div class="tear-notch">✂️ TAP TO TEAR</div>
+                                <div class="serrated-tear-line"></div>
+                            </div>
+                            <div class="packet-main-body">
+                                <div class="packet-shine-layer"></div>
+                                <div class="packet-badge">DELUXE PACK</div>
+                                <div class="packet-venue">TOUR 3 • ADELAIDE</div>
+                                <div class="packet-art-3d">🏏 ⭐ 🏆</div>
+                                <div class="packet-tap-prompt">TAP PACKET TO RIP OPEN!</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Stage 2: One-By-One Reveal Stage -->
+                    <div class="one-by-one-reveal-container hidden" id="revealStage">
+                        <div class="reveal-remaining-count" id="revealRemainingCount">3 Items Remaining</div>
+
+                        <div class="reveal-card-3d-spot" id="revealCardSpot">
+                            <!-- Card or Currency Injected by JS with 3D Flip -->
+                        </div>
+
+                        <div class="tap-next-hint" id="tapNextHint">Tap anywhere to continue 👉</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Card Upgrade Modal -->
+            <div class="card-upgrade-modal hidden" id="cardUpgradeModal">
+                <div class="upgrade-modal-card">
+                    <h3 class="upgrade-player-title" id="upgradePlayerTitle">Upgrade Card</h3>
+                    <div class="upgrade-stats-preview" id="upgradeStatsPreview">
+                        Power: 25 ➜ <strong>27</strong> (+2)
+                    </div>
+                    <div class="upgrade-copies-info" id="upgradeCopiesInfo">
+                        Copies: 22/20
+                    </div>
+                    <div class="upgrade-actions-row">
+                        <button class="green-price-btn" id="confirmUpgradeBtn">Upgrade • 2,000 🪙</button>
+                        <button class="cancel-gray-btn" id="closeUpgradeModalBtn">Close</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Level Up Celebration Modal -->
+            <div class="level-up-modal hidden" id="levelUpModal">
+                <div class="level-up-card">
+                    <div class="level-up-rays"></div>
+                    <div class="level-up-star-burst">⭐</div>
+                    <h2 class="level-up-title">LEVEL UP!</h2>
+                    <div class="level-up-new-num" id="levelUpNewNum">⭐ 2</div>
+                    <p class="level-up-desc">Congratulations! You reached a new player rank!</p>
+
+                    <div class="level-up-reward-box">
+                        <div class="reward-tag">LEVEL BONUS REWARD</div>
+                        <div class="reward-val" id="levelUpBonusVal">+200 🪙 Coins</div>
+                    </div>
+
+                    <button class="gold-continue-btn" id="claimLevelUpBtn">CLAIM & CONTINUE</button>
+                </div>
+            </div>
+
+            <!-- Player Profile & XP Modal -->
+            <div class="player-profile-modal hidden" id="playerProfileModal">
+                <div class="profile-modal-card">
+                    <div class="profile-header-row">
+                        <div class="profile-avatar-big">👤</div>
+                        <div class="profile-info-block">
+                            <h3 class="profile-username" id="profileUsername">Player</h3>
+                            <div class="profile-level-badge" id="profileLevelBadge">Level ⭐ 1</div>
+                        </div>
+                        <button class="profile-close-btn" id="closeProfileModalBtn">✕</button>
+                    </div>
+
+                    <!-- XP Track -->
+                    <div class="profile-xp-section">
+                        <div class="profile-xp-labels">
+                            <span>Experience (XP)</span>
+                            <span id="profileXpFraction">0 / 50 XP</span>
+                        </div>
+                        <div class="profile-xp-bar-bg">
+                            <div class="profile-xp-bar-fill" id="profileXpFill" style="width: 0%;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Career Stats -->
+                    <div class="profile-stats-grid">
+                        <div class="stat-box">
+                            <div class="stat-num" id="statMatchesPlayed">0</div>
+                            <div class="stat-label">MATCHES</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-num" id="statMatchesWon">0</div>
+                            <div class="stat-label">WINS</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-num" id="statWinRate">0%</div>
+                            <div class="stat-label">WIN RATE</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-num" id="statTotalSixes">0</div>
+                            <div class="stat-label">SIXES</div>
+                        </div>
+                    </div>
+
+                    <button class="rematch-btn" id="profileOkBtn" style="margin-top: 14px;">CLOSE</button>
+                </div>
+            </div>
+
+            <!-- Free Rewards Modal (Exact Match to Screenshot) -->
+            <div class="free-rewards-modal hidden" id="freeRewardsModal">
+                <div class="free-rewards-card">
+                    <div class="free-rewards-header">
+                        <h3 class="free-rewards-title">Free Rewards</h3>
+                        <button class="free-close-btn" id="closeFreeRewardsBtn">✕</button>
+                    </div>
+
+                    <!-- Top Green Instant Claim Banner -->
+                    <div class="free-primary-claim-btn" id="freeInstantClaimBtn">
+                        <div class="free-coin-icon-circle">🪙</div>
+                        <div class="free-claim-text-col">
+                            <div class="free-claim-amount">100</div>
+                            <div class="free-claim-sub">Collect now!</div>
+                        </div>
+                    </div>
+
+                    <!-- 4 Video / Ad Reward Rows -->
+                    <div class="free-rewards-list">
+                        <!-- Row 1: 450 Coins (Step 1) -->
+                        <div class="reward-row-item" id="rewardRow1">
+                            <div class="reward-item-left">
+                                <div class="reward-icon-stack">🪙</div>
+                                <div class="reward-item-val">450</div>
+                            </div>
+                            <button class="ad-collect-btn green-btn" id="adCollect450">
+                                <span class="ad-clapper-icon">🎬</span> Collect
+                            </button>
+                        </div>
+
+                        <!-- Row 2: 550 Coins (Step 2 - Locked until Row 1 done) -->
+                        <div class="reward-row-item locked" id="rewardRow2">
+                            <div class="reward-item-left">
+                                <div class="reward-icon-stack">🪙</div>
+                                <div class="reward-item-val">550</div>
+                            </div>
+                            <button class="ad-collect-btn silver-btn locked-btn" id="adCollect550">
+                                <span class="ad-clapper-icon">🎬</span> Collect
+                            </button>
+                        </div>
+
+                        <!-- Row 3: Blue Foil Pack (Step 3 - Locked until Row 2 done) -->
+                        <div class="reward-row-item locked" id="rewardRow3">
+                            <div class="reward-item-left">
+                                <div class="mini-pouch-preview blue">🃏</div>
+                                <div class="reward-pack-meta">
+                                    <div class="pack-sub">Opens immediately</div>
+                                </div>
+                            </div>
+                            <button class="ad-collect-btn silver-btn locked-btn" id="adCollectPack">
+                                <span class="ad-clapper-icon">🎬</span> Collect
+                            </button>
+                        </div>
+
+                        <!-- Row 4: 5 Gems (Step 4 - Locked until Row 3 done) -->
+                        <div class="reward-row-item locked" id="rewardRow4">
+                            <div class="reward-item-left">
+                                <div class="reward-icon-stack gem-stack">💎</div>
+                                <div class="reward-item-val">5</div>
+                            </div>
+                            <button class="ad-collect-btn silver-btn locked-btn" id="adCollectGems">
+                                <span class="ad-clapper-icon">🎬</span> Collect
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Floating Smooth Overlay Toast (Zero Layout Shift / Card Never Shakes) -->
+                    <div class="ad-notice-toast hidden" id="adNoticeToast">
+                        📢 Video Ads are currently not available. Please try again later!
+                    </div>
+                </div>
+            </div>
+
+            <!-- Incoming 1 VS 1 Challenge Modal (When online friend challenges you) -->
+            <div class="incoming-challenge-modal hidden" id="incomingChallengeModal">
+                <div class="challenge-popup-card">
+                    <div class="challenge-sword-icon">⚔️</div>
+                    <h3 class="challenge-popup-title">1 VS 1 CHALLENGE!</h3>
+                    <div class="challenger-profile-box">
+                        <div class="challenger-avatar" id="challengerAvatar">👨</div>
+                        <div class="challenger-info-col">
+                            <div class="challenger-name-row">
+                                <span id="challengerFlag">🌐</span>
+                                <strong id="challengerName">Player</strong>
+                            </div>
+                            <div class="challenger-rank-pill" id="challengerRank">⭐ 27 • Virtuoso</div>
+                        </div>
+                    </div>
+                    <p class="challenge-popup-text">Challenged you to a <strong>1 VS 1 Cricket Match</strong>! (Entry
+                        Fee: 100 🪙)</p>
+
+                    <div class="challenge-timer-bar">
+                        <div class="challenge-timer-fill" id="challengeTimerFill"></div>
+                    </div>
+
+                    <div class="challenge-actions-row">
+                        <button class="challenge-accept-btn" id="accept1v1Btn">Accept & Play 🏏</button>
+                        <button class="challenge-decline-btn" id="decline1v1Btn">Decline ✕</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Waiting for Friend to Accept Modal -->
+            <div class="waiting-friend-modal hidden" id="waitingFriendModal">
+                <div class="waiting-friend-card">
+                    <div class="waiting-radar-ring">
+                        <div class="radar-sweep"></div>
+                        <span class="radar-center-icon">🏏</span>
+                    </div>
+                    <h3 class="waiting-title">CHALLENGING FRIEND...</h3>
+                    <p class="waiting-desc" id="waitingFriendDesc">Waiting for friend to accept...</p>
+                    <div class="waiting-countdown-text" id="waitingCountdownText">⏱️ 15s</div>
+                    <button class="cancel-gray-btn" id="cancel1v1ChallengeBtn">Cancel Challenge</button>
+                </div>
+            </div>
+
+            <!-- Automatic Referral Reward Confirmation Modal -->
+            <div class="referral-reward-modal hidden" id="referralRewardModal">
+                <div class="referral-reward-card">
+                    <div class="referral-sparkle-icon">🎁</div>
+                    <h3 class="referral-modal-title">INVITATION REWARD!</h3>
+                    <p class="referral-modal-subtitle">Referral link detected automatically! Confirm to claim your
+                        welcome bonus.</p>
+
+                    <div class="referral-inviter-pill">
+                        <div class="inviter-avatar">👤</div>
+                        <div class="inviter-meta">
+                            <span class="inviter-label">Invited By</span>
+                            <strong class="inviter-name" id="referralInviterName">Player</strong>
+                        </div>
+                        <div class="inviter-code-badge" id="referralCodeBadge">CRIC-LEAGUE-100</div>
+                    </div>
+
+                    <div class="referral-prize-box">
+                        <div class="referral-prize-coins">
+                            <span class="coin-emoji">🪙</span>
+                            <span class="coin-qty">+1,500</span>
+                        </div>
+                        <div class="referral-prize-sub">Free Starter Coins & +50 XP</div>
+                    </div>
+
+                    <button class="referral-claim-confirm-btn" id="confirmReferralRewardBtn">
+                        CONFIRM & CLAIM 1,500 🪙
+                    </button>
+                    <button class="referral-dismiss-btn" id="dismissReferralModalBtn">Maybe Later</button>
+                </div>
+            </div>
+
+            <!-- Country Selection & Starting 11 Squad Modal -->
+            <div class="country-modal-backdrop hidden" id="countrySelectionModal">
+                <div class="country-modal-card">
+                    <div class="country-modal-header">
+                        <div class="header-text-group">
+                            <h3 class="country-modal-title">CHOOSE YOUR COUNTRY & SQUAD</h3>
+                            <p class="country-modal-sub">Select your favorite national team</p>
+                        </div>
+                        <button class="country-modal-close" id="closeCountryModalBtn" type="button">✕</button>
+                    </div>
+
+                    <!-- Category Segment Tabs -->
+                    <div class="country-category-tabs">
+                        <button class="country-cat-btn active" id="catMajorNations" type="button">
+                            🏏 Major Cricket Nations
+                        </button>
+                        <button class="country-cat-btn" id="catOtherNations" type="button">
+                            🌐 Other Nations & Global Mix
+                        </button>
+                    </div>
+
+                    <!-- Countries Grid -->
+                    <div class="country-selection-grid" id="countryListGrid">
+                        <!-- Populated by JS -->
+                    </div>
+
+                    <!-- Selected Country 11-Player Live Preview -->
+                    <div class="squad-live-preview-box" id="squadLivePreviewBox">
+                        <div class="preview-header-bar">
+                            <div class="preview-country-info">
+                                <span class="preview-flag" id="previewCountryFlag">🇮🇳</span>
+                                <div>
+                                    <div class="preview-name" id="previewCountryName">India</div>
+                                    <div class="preview-meta" id="previewCountryMeta"></div>
+                                </div>
+                            </div>
+                            <div class="preview-pwr-badge" id="previewTeamPowerBadge">380 PWR</div>
+                        </div>
+
+                        <div class="preview-roster-heading">Starting 11 Players Roster:</div>
+                        <div class="preview-players-scroller" id="previewPlayersScroller">
+                            <!-- Populated by JS with 11 cards -->
+                        </div>
+                    </div>
+
+                    <!-- Confirmation Footer -->
+                    <div class="country-modal-footer">
+                        <button class="country-confirm-btn" id="confirmCountrySelectBtn" type="button">
+                            <span class="btn-icon">🏏</span>
+                            <span class="btn-text">CONFIRM & SET STARTING 11</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Ball Purchase Confirmation Modal (AAA Video Game Quality) -->
+            <div class="custom-app-modal hidden" id="ballPurchaseConfirmModal">
+                <div class="modal-glass-card confirm-modal-card">
+                    <div class="modal-header-row">
+                        <span class="modal-badge-pill gold-pill">CONFIRM PURCHASE</span>
+                        <button class="modal-close-btn" id="closeBallConfirmModalBtn">✕</button>
+                    </div>
+                    <div class="modal-body-content">
+                        <div class="confirm-ball-glow-ring">
+                            <div class="confirm-ball-preview" id="confirmBallVisual">
+                                <!-- 3D Ball Canvas -->
+                            </div>
+                        </div>
+                        <h4 class="confirm-ball-name" id="confirmBallNameTag">🔥 Fireball Inferno</h4>
+                        <p class="confirm-question">Do you want to buy this ball skin for <strong
+                                id="confirmBallPriceTag">1,000 🪙</strong>?</p>
+
+                        <div class="purchase-breakdown-box">
+                            <div class="breakdown-row">
+                                <span class="lbl">Item Price:</span>
+                                <span class="val gold-text" id="confirmPriceDetail">1,000 🪙</span>
+                            </div>
+                            <div class="breakdown-row">
+                                <span class="lbl">Your Coin Balance:</span>
+                                <span class="val sky-text" id="confirmUserCoinsDetail">2,500 🪙</span>
+                            </div>
+                            <div class="breakdown-row highlight-row">
+                                <span class="lbl">Balance After:</span>
+                                <span class="val green-text" id="confirmRemainingCoinsDetail">1,500 🪙</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-actions-row">
+                        <button class="modal-btn cancel" id="cancelBallPurchaseBtn">CANCEL</button>
+                        <button class="modal-btn confirm 3d-action-btn" id="acceptBallPurchaseBtn">CONFIRM & BUY
+                            🪙</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- No Coins Warning Modal (AAA Video Game Quality) -->
+            <div class="custom-app-modal hidden" id="noCoinsModal">
+                <div class="modal-glass-card warning-modal-card">
+                    <div class="modal-header-row">
+                        <span class="modal-badge-pill red-pill">INSUFFICIENT FUNDS</span>
+                        <button class="modal-close-btn" id="closeNoCoinsModalBtn">✕</button>
+                    </div>
+                    <div class="modal-body-content">
+                        <div class="warning-coin-pulse-ring">
+                            <div class="coin-pulse-avatar">🪙</div>
+                            <div class="no-entry-badge">🚫</div>
+                        </div>
+                        <h3 class="warning-title-text">NO COINS AVAILABLE! ⚠️</h3>
+                        <p class="warning-desc-text">
+                            You need more coins to unlock <strong id="noCoinsTargetName">⚡ Lightning Plasma</strong>.
+                        </p>
+
+                        <!-- Balance Comparison Grid -->
+                        <div class="balance-compare-grid">
+                            <div class="compare-col required-col">
+                                <span class="col-lbl">REQUIRED</span>
+                                <span class="col-val gold-val" id="noCoinsRequiredVal">1,500 🪙</span>
+                            </div>
+                            <div class="compare-divider">VS</div>
+                            <div class="compare-col current-col">
+                                <span class="col-lbl">YOUR COINS</span>
+                                <span class="col-val red-val" id="noCoinsCurrentVal">1,300 🪙</span>
+                            </div>
+                        </div>
+
+                        <!-- Shortfall Indicator Tag -->
+                        <div class="shortfall-alert-pill" id="noCoinsShortfallPill">
+                            ⚠️ Short by <strong id="noCoinsShortfallVal">200 🪙</strong>
+                        </div>
+                    </div>
+                    <div class="modal-actions-row">
+                        <button class="modal-btn secondary" id="dismissNoCoinsBtn">OKAY</button>
+                        <button class="modal-btn primary 3d-shop-btn" id="goToShopFromNoCoinsBtn">GO TO SHOP 🛒</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Season Ended Diamond Reward Modal -->
+            <div class="modal-overlay hidden" id="seasonRewardModal">
+                <div class="modal-card season-reward-dialog" style="text-align:center; max-width: 360px;">
+                    <div class="modal-header-banner"
+                        style="background: linear-gradient(135deg, #0284c7, #38bdf8); padding: 18px; border-radius: 16px 16px 0 0;">
+                        <div style="font-size: 48px; filter: drop-shadow(0 4px 12px rgba(56,189,248,0.5));">💎🏆💎</div>
+                        <h3
+                            style="color: #fff; font-size: 22px; font-weight: 800; margin: 6px 0 0 0; text-transform: uppercase; letter-spacing: 1px;">
+                            SEASON COMPLETED!</h3>
+                        <span style="color: #e0f2fe; font-size: 13px; font-weight: 600;"
+                            id="seasonRewardSeasonTag">Season Rewards</span>
+                    </div>
+                    <div class="modal-body" style="padding: 20px 16px;">
+                        <p style="color: #94a3b8; font-size: 14px; margin-bottom: 14px;" id="seasonRewardDesc">
+                            Congratulations! Based on your final leaderboard ranking, you have earned exclusive Diamond
+                            rewards!
+                        </p>
+                        <div
+                            style="background: rgba(15, 23, 42, 0.8); border: 2px solid rgba(56, 189, 248, 0.4); border-radius: 16px; padding: 16px; margin-bottom: 16px;">
+                            <div style="font-size: 13px; color: #94a3b8; font-weight: 700; text-transform: uppercase;">
+                                YOUR FINAL RANK</div>
+                            <div style="font-size: 28px; font-weight: 900; color: #f59e0b; margin: 4px 0;"
+                                id="seasonRewardRankVal">Rank #1 🥇</div>
+                            <div
+                                style="display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 24px; font-weight: 900; color: #38bdf8; margin-top: 8px;">
+                                <span>+<span id="seasonRewardGemsVal">1,500</span></span>
+                                <span>💎</span>
+                            </div>
+                        </div>
+                        <button class="modal-btn primary" id="claimSeasonRewardBtn"
+                            style="width: 100%; padding: 14px; font-size: 16px; font-weight: 800; background: linear-gradient(135deg, #10b981, #059669); border: none; border-radius: 12px; color: white; cursor: pointer; box-shadow: 0 4px 15px rgba(16,185,129,0.4);">
+                            COLLECT REWARD 💎
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Roadmap Milestone Claimed Celebration Dialog -->
+            <div class="modal-overlay hidden" id="roadmapClaimModal">
+                <div class="modal-card roadmap-claim-dialog" style="text-align: center; max-width: 360px;">
+                    <div class="modal-header-banner"
+                        style="background: linear-gradient(135deg, #10b981, #059669); padding: 18px; border-radius: 16px 16px 0 0;">
+                        <div style="font-size: 48px; filter: drop-shadow(0 4px 12px rgba(16,185,129,0.5));"
+                            id="roadmapModalIcon">🎁</div>
+                        <h3 style="color: #fff; font-size: 22px; font-weight: 800; margin: 6px 0 0 0;"
+                            id="roadmapModalTitle">MILESTONE UNLOCKED!</h3>
+                        <span style="color: #d1fae5; font-size: 13px; font-weight: 600;" id="roadmapModalLevelTag">Level
+                            2 Reward</span>
+                    </div>
+                    <div class="modal-body" style="padding: 20px 16px;">
+                        <div
+                            style="background: rgba(15, 23, 42, 0.85); border: 2px solid rgba(16, 185, 129, 0.4); border-radius: 16px; padding: 16px; margin-bottom: 16px;">
+                            <div style="font-size: 13px; color: #94a3b8; font-weight: 700; text-transform: uppercase;"
+                                id="roadmapModalUnlockTag">NEW UNLOCK</div>
+                            <div style="display: flex; justify-content: center; gap: 14px; margin-top: 10px;"
+                                id="roadmapModalPillsRow">
+                                <!-- Dynamic reward pills -->
+                            </div>
+                        </div>
+                        <button class="modal-btn primary" id="dismissRoadmapClaimBtn"
+                            style="width: 100%; padding: 14px; font-size: 16px; font-weight: 800; background: linear-gradient(135deg, #10b981, #059669); border: none; border-radius: 12px; color: white; cursor: pointer; box-shadow: 0 4px 15px rgba(16,185,129,0.4);">
+                            COLLECT REWARD ⚡
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 7-Day Daily Login Streak Retention Calendar Modal (Ultra-Compact Pro Glassmorphism) -->
+            <div class="modal-overlay hidden" id="dailyStreakModal">
+                <div class="modal-card compact-streak-dialog" id="dailyStreakDialog">
+                    <button class="compact-close-btn" id="closeDailyStreakModal" aria-label="Close">✕</button>
+
+                    <!-- Compact Modern Header -->
+                    <div class="compact-streak-header">
+                        <div class="compact-header-badge">
+                            <div class="streak-header-icon-box">
+                                <span class="badge-icon">🎁</span>
+                                <span class="streak-sparkle-dot"></span>
+                            </div>
+                            <div class="badge-text-box">
+                                <div class="streak-title-badge-row">
+                                    <h3 class="compact-streak-title">DAILY LOGIN REWARDS</h3>
+                                    <span class="streak-flame-tag" id="streakFlameBadge">🔥 STREAK: 1 DAY</span>
+                                </div>
+                                <div class="compact-timer-row">
+                                    <span class="compact-live-dot"></span>
+                                    <span class="compact-timer-text">Resets 12:00 AM • <strong
+                                            id="streakCountdownVal">--:--:--</strong></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="modal-body streak-modal-body">
+                        <div class="compact-streak-grid" id="streakGridCalendar">
+                            <!-- Rendered dynamically by JS -->
+                        </div>
+                        <button class="compact-claim-btn" id="claimDailyStreakBtn">
+                            <span class="claim-btn-shimmer"></span>
+                            <span class="claim-btn-title" id="claimDailyStreakBtnText">⚡ COLLECT BONUS</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- In-Game High-Production Reward Celebration Modal (Replaces browser alert on rewards) -->
+            <div class="modal-overlay hidden" id="rewardCelebrationModal">
+                <div class="modal-card reward-celebration-dialog">
+                    <div class="celebration-sunburst"></div>
+                    <div class="celebration-confetti-wrap" id="celebrationConfettiWrap"></div>
+                    <div class="celebration-inner-card">
+                        <div class="celebration-icon-frame">
+                            <div class="celebration-aura-pulse"></div>
+                            <span class="celebration-big-emoji" id="celebrationPrizeIcon">🪙</span>
+                        </div>
+                        <h2 class="celebration-main-title" id="celebrationTitle">BONUS COLLECTED!</h2>
+                        <p class="celebration-subtitle" id="celebrationSubtitle">Day 1 Login Streak Reward</p>
+                        <div class="celebration-reward-chip" id="celebrationRewardChip">
+                            <span class="celebration-chip-shine"></span>
+                            <span class="celebration-chip-amount" id="celebrationRewardVal">+500 COINS</span>
+                        </div>
+                        <button class="celebration-claim-btn" id="celebrationCollectBtn">
+                            <span class="claim-btn-shimmer"></span>
+                            <span id="celebrationBtnLabel">COLLECT & CONTINUE ⚡</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Custom In-Game Game Notice Modal (Replaces native browser alert) -->
+            <div class="modal-overlay hidden" id="gameNoticeModal">
+                <div class="modal-card game-notice-dialog">
+                    <button class="compact-close-btn" id="closeGameNoticeModal">✕</button>
+                    <div class="notice-icon-halo" id="gameNoticeIcon">🏏</div>
+                    <h3 class="notice-title" id="gameNoticeTitle">NOTICE</h3>
+                    <p class="notice-message-text" id="gameNoticeMessage"></p>
+                    <button class="notice-action-btn" id="gameNoticeOkBtn">GOT IT ✓</button>
+                </div>
+            </div>
+
+            <!-- Floating In-Game Toast Notification Container -->
+            <div class="game-toast-container" id="gameToastContainer"></div>
+
+            <!-- Elite Strike Pass Overview & Upgrade Modal (In-Game Enterprise Dialog) -->
+            <div class="modal-overlay hidden" id="elitePassPurchaseModal">
+                <div class="modal-card compact-streak-dialog"
+                    style="max-width: 360px; text-align: center; position: relative;">
+                    <button class="compact-close-btn" id="closeElitePassPurchaseModal" aria-label="Close">✕</button>
+
+                    <!-- Top Crown Hero -->
+                    <div style="padding: 24px 20px 20px 20px;">
+                        <div
+                            style="width: 72px; height: 72px; margin: 0 auto 12px auto; border-radius: 50%; background: radial-gradient(circle, rgba(245,158,11,0.3) 0%, transparent 70%); display: flex; align-items: center; justify-content: center; border: 2px solid #fde047; box-shadow: 0 0 20px rgba(245,158,11,0.5);">
+                            <span style="font-size: 38px; filter: drop-shadow(0 2px 8px rgba(0,0,0,0.8));">👑</span>
+                        </div>
+
+                        <h3 id="elitePassModalTitle"
+                            style="font-size: 19px; font-weight: 900; color: #ffffff; margin: 0 0 4px 0; letter-spacing: 0.5px;">
+                            ELITE STRIKE PASS</h3>
+                        <div id="elitePassModalBadge"
+                            style="display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 900; background: rgba(245,158,11,0.2); border: 1px solid #facc15; color: #facc15; margin-bottom: 14px;">
+                            SEASON 1: STRIKE ROYALE
+                        </div>
+
+                        <!-- Perks Grid -->
+                        <div
+                            style="display: flex; flex-direction: column; gap: 8px; text-align: left; background: rgba(15,23,42,0.8); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 12px; margin-bottom: 16px;">
+                            <div
+                                style="display: flex; align-items: center; gap: 10px; font-size: 12px; font-weight: 800; color: #e2e8f0;">
+                                <span style="font-size: 16px;">⚡</span>
+                                <span>Unlock All 30 Premium Reward Tiers</span>
+                            </div>
+                            <div
+                                style="display: flex; align-items: center; gap: 10px; font-size: 12px; font-weight: 800; color: #e2e8f0;">
+                                <span style="font-size: 16px;">🏆</span>
+                                <span>Exclusive 3D Skins, Emotes & Balls</span>
+                            </div>
+                            <div
+                                style="display: flex; align-items: center; gap: 10px; font-size: 12px; font-weight: 800; color: #e2e8f0;">
+                                <span style="font-size: 16px;">🎁</span>
+                                <span>Instant +200 Tokens & 2x XP Booster</span>
+                            </div>
+                        </div>
+
+                        <!-- Action Button Container -->
+                        <div id="elitePassModalActionWrap">
+                            <button class="compact-claim-btn" id="confirmBuyElitePassBtn">
+                                <span class="claim-btn-shimmer"></span>
+                                <span id="confirmBuyElitePassBtnText">👑 UNLOCK FOR 500 💎 GEMS</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mandatory Elite Pass Login Prompt Modal (AAA Mobile OAuth) -->
+            <div class="modal-overlay hidden" id="elitePassLoginModal">
+                <div class="modal-card compact-streak-dialog"
+                    style="max-width: 360px; text-align: center; position: relative;">
+                    <button class="compact-close-btn" id="closeElitePassLoginModal" aria-label="Close">✕</button>
+
+                    <div style="padding: 24px 20px 20px 20px;">
+                        <div style="position: relative; display: inline-block; margin-bottom: 10px;">
+                            <span
+                                style="font-size: 48px; filter: drop-shadow(0 4px 12px rgba(245,158,11,0.6));">👑</span>
+                            <span
+                                style="position: absolute; bottom: -2px; right: -6px; background: #0f172a; border: 1.5px solid #facc15; border-radius: 50%; font-size: 14px; padding: 2px 4px;">🔒</span>
+                        </div>
+
+                        <h3
+                            style="font-size: 18px; font-weight: 900; color: #ffffff; margin: 0 0 6px 0; letter-spacing: 0.5px;">
+                            SIGN IN MANDATORY</h3>
+                        <p
+                            style="font-size: 11px; color: #94a3b8; font-weight: 700; line-height: 1.4; margin: 0 0 16px 0;">
+                            To purchase the <strong style="color:#fde047;">Elite Strike Pass</strong> and securely sync
+                            VIP tiers, 3D skins, and emotes to your account, sign in now:
+                        </p>
+
+                        <div style="display: flex; flex-direction: column; gap: 10px;">
+                            <button id="eliteModalGoogleBtn"
+                                style="width: 100%; padding: 12px; border-radius: 12px; background: #ffffff; color: #1e293b; font-size: 13px; font-weight: 900; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; box-shadow: 0 4px 14px rgba(0,0,0,0.4); transition: transform 0.15s ease;">
+                                <span style="font-size: 16px;">🌐</span> Sign in with Google Play Games
+                            </button>
+                            <button id="eliteModalFacebookBtn"
+                                style="width: 100%; padding: 12px; border-radius: 12px; background: linear-gradient(135deg, #1877f2, #0d5ec4); color: #ffffff; font-size: 13px; font-weight: 900; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; box-shadow: 0 4px 14px rgba(24,119,242,0.4); transition: transform 0.15s ease;">
+                                <span style="font-size: 16px;">🇫</span> Sign in with Facebook
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Custom 1v1 Room Matchmaking Modal (Ultra-Modern Cyber Arena) -->
+            <div class="modal-overlay hidden" id="customRoomModal">
+                <div class="modal-card compact-streak-dialog" style="max-width: 350px; position: relative;">
+                    <button class="compact-close-btn" id="closeCustomRoomModal" aria-label="Close">✕</button>
+
+                    <!-- Compact Modern Header -->
+                    <div class="compact-streak-header"
+                        style="background: linear-gradient(180deg, rgba(225, 29, 72, 0.25) 0%, transparent 100%); border-bottom: 1px solid rgba(244, 63, 94, 0.25);">
+                        <div class="compact-header-badge">
+                            <span class="badge-icon"
+                                style="filter: drop-shadow(0 2px 8px rgba(225, 29, 72, 0.6));">⚔️</span>
+                            <div class="badge-text-box">
+                                <h3 class="compact-streak-title" style="color: #ffffff;">1v1 PRIVATE ARENA</h3>
+                                <div class="compact-timer-row">
+                                    <span class="compact-live-dot"
+                                        style="background: #fb7185; box-shadow: 0 0 6px #fb7185;"></span>
+                                    <span class="compact-timer-text">Direct Duel with 4-Digit Room PIN</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="modal-body"
+                        style="padding: 12px 14px 14px 14px; display: flex; flex-direction: column; gap: 10px;">
+                        <!-- Section 1: Host Duel -->
+                        <div class="cyber-duel-box blue-box">
+                            <div class="cyber-duel-header">
+                                <span class="cyber-box-title blue-text">🎮 HOST NEW DUEL</span>
+                                <span class="cyber-box-badge blue-badge">CUSTOM 1v1</span>
+                            </div>
+
+                            <label class="cyber-box-label">Select Stadium Venue:</label>
+
+                            <!-- Custom Glass Dropdown -->
+                            <div class="custom-glass-dropdown-wrapper" id="customStadiumDropdownWrap">
+                                <button type="button" class="custom-glass-dropdown-trigger"
+                                    id="customStadiumDropdownTrigger">
+                                    <span class="trigger-label" id="customStadiumSelectedLabel">🏟️ Adelaide Oval (Tour
+                                        3)</span>
+                                    <span class="trigger-chevron" id="customStadiumChevron">▾</span>
+                                </button>
+                                <div class="custom-glass-dropdown-menu hidden" id="customStadiumDropdownMenu">
+                                    <div class="dropdown-item selected" data-value="Adelaide Oval">
+                                        <span>🏟️ Adelaide Oval (Tour 3)</span>
+                                        <span class="item-check">✓</span>
+                                    </div>
+                                    <div class="dropdown-item" data-value="Dubai Stadium">
+                                        <span>🏟️ Dubai Stadium (Tour 4)</span>
+                                        <span class="item-check"></span>
+                                    </div>
+                                    <div class="dropdown-item" data-value="Melbourne Arena">
+                                        <span>🏟️ Melbourne Arena (Tour 7)</span>
+                                        <span class="item-check"></span>
+                                    </div>
+                                    <div class="dropdown-item" data-value="Lord's London">
+                                        <span>🏟️ Lord's London (Tour 8)</span>
+                                        <span class="item-check"></span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Hidden Select synced with JS -->
+                            <select id="customRoomStadiumSelect" style="display: none;">
+                                <option value="Adelaide Oval" selected>Adelaide Oval</option>
+                                <option value="Dubai Stadium">Dubai Stadium</option>
+                                <option value="Melbourne Arena">Melbourne Arena</option>
+                                <option value="Lord's London">Lord's London</option>
+                            </select>
+
+                            <button class="cyber-action-btn blue-btn" id="btnCreateCustomRoom">
+                                <span class="btn-shimmer"></span>
+                                <span>⚡ GENERATE 4-DIGIT PIN</span>
+                            </button>
+
+                            <!-- Generated Room Box -->
+                            <div class="room-created-box hidden" id="roomCreatedBox">
+                                <div class="room-code-label">SHARE 4-DIGIT PIN WITH OPPONENT:</div>
+                                <div class="room-code-lcd-cells" id="createdRoomCodeCells">
+                                    <span class="lcd-cell" id="pinDigit1">6</span>
+                                    <span class="lcd-cell" id="pinDigit2">9</span>
+                                    <span class="lcd-cell" id="pinDigit3">4</span>
+                                    <span class="lcd-cell" id="pinDigit4">8</span>
+                                </div>
+                                <div style="display: flex; gap: 8px; justify-content: center; margin: 8px 0;">
+                                    <button class="copy-pin-pill modern-pill" id="copyRoomPinBtn">📋 Copy Code</button>
+                                </div>
+                                <div class="room-waiting-label" id="waitingOpponentLabel">Waiting for player to join...
+                                    ⏳</div>
+                            </div>
+                        </div>
+
+                        <!-- Section 2: Join Duel -->
+                        <div class="cyber-duel-box red-box">
+                            <div class="cyber-duel-header">
+                                <span class="cyber-box-title red-text">⚔️ JOIN FRIEND'S DUEL</span>
+                                <span class="cyber-box-badge red-badge">DIRECT PIN</span>
+                            </div>
+
+                            <input type="number" id="joinRoomCodeInput" placeholder="ENTER 4-DIGIT ROOM PIN"
+                                maxlength="4" class="cyber-pin-input" />
+
+                            <button class="cyber-action-btn red-btn" id="btnJoinCustomRoom">
+                                <span class="btn-shimmer"></span>
+                                <span>⚔️ ENTER DUEL & PLAY</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3-Day Lucky Spin & Win Modal (AAA Enterprise Holographic Wheel) -->
+            <div class="modal-overlay hidden" id="spinWinModal">
+                <div class="modal-card compact-streak-dialog spin-modal-card"
+                    style="max-width: 360px; position: relative;">
+                    <button class="compact-close-btn" id="closeSpinWinModal" aria-label="Close">✕</button>
+
+                    <!-- Header -->
+                    <div class="compact-streak-header"
+                        style="background: linear-gradient(180deg, rgba(245, 158, 11, 0.25) 0%, transparent 100%); border-bottom: 1px solid rgba(245, 158, 11, 0.3);">
+                        <div class="compact-header-badge">
+                            <span class="badge-icon"
+                                style="filter: drop-shadow(0 2px 8px rgba(245, 158, 11, 0.6)); animation: floatSlow 2.5s infinite;">🎡</span>
+                            <div class="badge-text-box">
+                                <h3 class="compact-streak-title" style="color: #ffffff;">LUCKY SPIN & WIN</h3>
+                                <div class="compact-timer-row">
+                                    <span class="compact-live-dot"
+                                        style="background: #facc15; box-shadow: 0 0 6px #facc15;"></span>
+                                    <span class="compact-timer-text" id="spinHeaderTimerText">3-Day Free Cycle</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Wheel Canvas Container with 16 Chasing LED Lights -->
+                    <div class="spin-stage-wrapper">
+                        <div class="wheel-pointer-arrow">▼</div>
+                        <div class="wheel-led-ring" id="wheelLedRing">
+                            <!-- 16 LED Pegs -->
+                            <span class="wheel-led-dot" style="--d: 0"></span>
+                            <span class="wheel-led-dot" style="--d: 1"></span>
+                            <span class="wheel-led-dot" style="--d: 2"></span>
+                            <span class="wheel-led-dot" style="--d: 3"></span>
+                            <span class="wheel-led-dot" style="--d: 4"></span>
+                            <span class="wheel-led-dot" style="--d: 5"></span>
+                            <span class="wheel-led-dot" style="--d: 6"></span>
+                            <span class="wheel-led-dot" style="--d: 7"></span>
+                            <span class="wheel-led-dot" style="--d: 8"></span>
+                            <span class="wheel-led-dot" style="--d: 9"></span>
+                            <span class="wheel-led-dot" style="--d: 10"></span>
+                            <span class="wheel-led-dot" style="--d: 11"></span>
+                            <span class="wheel-led-dot" style="--d: 12"></span>
+                            <span class="wheel-led-dot" style="--d: 13"></span>
+                            <span class="wheel-led-dot" style="--d: 14"></span>
+                            <span class="wheel-led-dot" style="--d: 15"></span>
+                        </div>
+                        <canvas id="spinWheelCanvas" width="280" height="280" class="spin-wheel-canvas"></canvas>
+
+                        <!-- Center 3D Spin Push Button -->
+                        <button class="wheel-center-push-btn" id="btnSpinWheel">
+                            <span class="center-btn-text">SPIN</span>
+                            <span class="center-btn-sub" id="spinBtnSub">FREE</span>
+                        </button>
+                    </div>
+
+                    <!-- Cooldown Bar & Extra Spin Options -->
+                    <div class="spin-footer-bar">
+                        <div class="spin-timer-badge">
+                            <span class="spin-timer-icon">⏳</span>
+                            <span class="spin-timer-label" id="spinCountdownVal">FREE SPIN READY!</span>
+                        </div>
+                        <button class="gem-respin-btn hidden" id="btnGemReSpin">
+                            <span>💎 25 GEMS SPIN</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Spin & Win Celebration Winner Modal -->
+            <div class="modal-overlay hidden" id="spinPrizeModal">
+                <div class="modal-card compact-streak-dialog prize-celebration-dialog"
+                    style="max-width: 330px; text-align: center; position: relative;">
+                    <div class="prize-sparkle-bg"></div>
+                    <div style="padding: 24px 20px 20px 20px;">
+                        <div class="prize-trophy-aura">
+                            <span class="prize-emoji" id="spinPrizeIcon">🏆</span>
+                        </div>
+                        <h3
+                            style="font-size: 20px; font-weight: 900; color: #facc15; margin: 8px 0 4px 0; letter-spacing: 0.5px;">
+                            CONGRATULATIONS!</h3>
+                        <p style="font-size: 11px; color: #94a3b8; font-weight: 700; margin: 0 0 12px 0;">You won from
+                            the Lucky Wheel:</p>
+                        <div class="prize-reward-pill" id="spinPrizeLabel">50 💎 MEGA GEMS</div>
+                        <button class="compact-claim-btn" id="collectSpinPrizeBtn" style="margin-top: 16px;">
+                            <span class="claim-btn-shimmer"></span>
+                            <span>COLLECT REWARD ✓</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- In-Match Circular Emote Wheel Overlay (Free Fire Emotes) -->
+            <div class="modal-overlay hidden" id="matchEmoteWheelOverlay">
+                <div class="emote-wheel-container">
+                    <button class="close-emote-wheel-btn" id="closeEmoteWheelBtn">✕</button>
+                    <div class="emote-wheel-center-label">TAUNT</div>
+                    <div class="emote-wheel-node node-pos-1" data-id="e1" data-icon="💥"
+                        data-label="Helicopter Shot Flex">
+                        <span class="emote-icon">💥</span>
+                        <span class="emote-txt">Helicopter</span>
+                    </div>
+                    <div class="emote-wheel-node node-pos-2" data-id="e2" data-icon="🤫" data-label="Shhh Silence">
+                        <span class="emote-icon">🤫</span>
+                        <span class="emote-txt">Silence</span>
+                    </div>
+                    <div class="emote-wheel-node node-pos-3" data-id="e3" data-icon="🔥" data-label="Fire Dance">
+                        <span class="emote-icon">🔥</span>
+                        <span class="emote-txt">Fire Dance</span>
+                    </div>
+                    <div class="emote-wheel-node node-pos-4" data-id="e4" data-icon="🕶️" data-label="Thug Life">
+                        <span class="emote-icon">🕶️</span>
+                        <span class="emote-txt">Thug Life</span>
+                    </div>
+                    <div class="emote-wheel-node node-pos-5" data-id="e5" data-icon="😂" data-label="Laughing Taunt">
+                        <span class="emote-icon">😂</span>
+                        <span class="emote-txt">Laugh</span>
+                    </div>
+                    <div class="emote-wheel-node node-pos-6" data-id="e6" data-icon="🏏" data-label="Bat Salutation">
+                        <span class="emote-icon">🏏</span>
+                        <span class="emote-txt">Salute</span>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+
+        <!-- Bottom Navigation Bar (Screens 2, 9, 10, 11, 12) -->
+        <footer class="app-bottom-nav" id="appBottomNav">
+            <button class="nav-tab-btn active" data-target="screen-home" id="navHome">
+                <div class="nav-icon">🏠</div>
+                <span class="nav-label">HOME</span>
+            </button>
+            <button class="nav-tab-btn" data-target="screen-clubs" id="navClubs">
+                <div class="nav-icon">🛡️</div>
+                <span class="nav-label">CLUBS</span>
+            </button>
+            <button class="nav-tab-btn has-badge" data-target="screen-team" id="navTeam">
+                <div class="nav-icon">🃏</div>
+                <span class="nav-label">TEAM</span>
+                <span class="nav-badge-dot">17</span>
+            </button>
+            <button class="nav-tab-btn has-badge" data-target="screen-shop" id="navShop">
+                <div class="nav-icon">🛒</div>
+                <span class="nav-label">SHOP</span>
+                <span class="nav-badge-dot orange-dot">!</span>
+            </button>
+            <button class="nav-tab-btn" data-target="screen-leaderboard" id="navRanking">
+                <div class="nav-icon">🏆</div>
+                <span class="nav-label">RANKING</span>
+            </button>
+        </footer>
+    </div>
+
+    <!-- ============================================================= -->
+    <!-- Character Studio — first-launch onboarding + re-editable creator -->
+    <!-- ============================================================= -->
+    <div class="character-studio-modal hidden" id="characterStudioModal">
+        <div class="cs-backdrop"></div>
+        <div class="cs-dialog">
+            <div class="cs-header">
+                <div class="cs-title" id="csTitle">Create Your Player</div>
+                <button class="cs-close-btn" id="csCloseBtn" title="Close">✕</button>
+            </div>
+
+            <div class="cs-stage-wrap">
+                <div class="cs-stage" id="characterStudioStage"></div>
+                <button class="cs-swing-btn" id="csSwingBtn" title="Play a shot">🏏 Swing</button>
+                <div class="cs-drag-hint">Drag to rotate • tap to swing</div>
+            </div>
+
+            <div class="cs-controls">
+                <div class="cs-name-row" id="csNameRow"></div>
+                <div class="cs-tabs" id="csTabs"></div>
+                <div class="cs-panels" id="csPanels"></div>
+            </div>
+
+            <div class="cs-footer">
+                <button class="cs-cta-btn" id="csCtaBtn">Start Playing 🏏</button>
+            </div>
+        </div>
+
+        <!-- Onboarding phase A: pick a nation first -->
+        <div class="cs-onboard-country hidden" id="csOnboardCountry">
+            <div class="cs-onboard-inner">
+                <div class="cs-onboard-title">🌍 Pick Your Nation</div>
+                <div class="cs-onboard-sub">Choose the team you'll represent on the pitch</div>
+                <div class="cs-country-grid" id="csOnboardCountryGrid"></div>
+                <button class="cs-cta-btn" id="csOnboardNextBtn">Next: Create Player →</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="playerAvatars.js?v=5.1"></script>
+    <script src="ballParticles.js?v=5.1"></script>
+    <script src="ballSkinsEngine.js?v=5.1"></script>
+    <script src="hero3dBatsman.js?v=19.0"></script>
+    <script src="characterStudio.js?v=19.0"></script>
+    <script src="app.js?v=20.0"></script>
+</body>
+
+</html>

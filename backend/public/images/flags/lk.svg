@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" width="100%" height="100%">
+  <!-- Gold Outer Border -->
+  <rect width="1200" height="600" fill="#FFBE29"/>
+  <!-- Inner Maroon Box -->
+  <rect x="50" y="50" width="1100" height="500" fill="#000000"/>
+  <!-- Teal Vertical Stripe -->
+  <rect x="70" y="70" width="120" height="460" fill="#00534E"/>
+  <!-- Orange Vertical Stripe -->
+  <rect x="210" y="70" width="120" height="460" fill="#EB7400"/>
+  <!-- Maroon Main Field -->
+  <rect x="350" y="70" width="780" height="460" fill="#8D153A"/>
+  <!-- Bo Leaves (4 corners) -->
+  <g fill="#FFBE29">
+    <circle cx="390" cy="110" r="22"/>
+    <circle cx="1090" cy="110" r="22"/>
+    <circle cx="390" cy="490" r="22"/>
+    <circle cx="1090" cy="490" r="22"/>
+  </g>
+  <!-- Golden Lion with Sword -->
+  <g transform="translate(680, 240) scale(1.3)" fill="#FFBE29">
+    <!-- Lion Body -->
+    <path d="M -40,60 Q -80,40 -90,0 Q -60,-40 -20,-30 Q 20,-60 60,-40 Q 80,0 60,50 Q 20,80 -40,60 Z"/>
+    <!-- Mane & Head -->
+    <circle cx="40" cy="-30" r="35"/>
+    <circle cx="65" cy="-25" r="20"/>
+    <!-- Tail -->
+    <path d="M -80,10 Q -120,30 -110,-40 Q -90,-80 -60,-60 Q -75,-40 -70,-10 Z"/>
+    <!-- Sword in Hand -->
+    <rect x="50" y="-120" width="12" height="110" rx="3"/>
+    <rect x="35" y="-30" width="42" height="12" rx="3"/>
+  </g>
+</svg>
