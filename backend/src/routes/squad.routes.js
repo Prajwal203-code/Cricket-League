@@ -1,63 +1,75 @@
+/**
+ * Squad cards: the player's starting eleven, upgrades and lineup.
+ *
+ * Country and preview lookups are public reference data. Everything that reads
+ * or writes a specific player's squad now requires a session, and acts on that
+ * session's account rather than on a `userId` taken from the request.
+ */
 const express = require('express');
 const router = express.Router();
 const { getPool, syncUserSquadForCountry, getStartingSquadForCountry, getAllCountryOptions } = require('../config/db');
+const { requireAuth } = require('../middleware/auth');
+const { applyWalletDelta } = require('../services/userService');
+const { SQUAD, cardUpgradeCost } = require('../config/gameRules');
 
-// GET /api/squad/countries (List of major & non-major countries with 11-player squad preview)
-router.get('/countries', (req, res) => {
+/** Shapes a DB row into the camelCase form the client renders. */
+function toCard(c) {
+    return {
+        ...c,
+        name: c.card_name,
+        maxCopies: c.max_copies,
+        order: c.batting_order,
+        countryOrigin: c.country_origin,
+        originFlag: c.origin_flag,
+        active: Boolean(c.is_active)
+    };
+}
+
+// --- Public reference data -------------------------------------------------
+
+/** GET /api/squad/countries — every selectable country and its roster preview. */
+router.get('/countries', (req, res, next) => {
     try {
-        const countryOptions = getAllCountryOptions();
-        res.json({
-            success: true,
-            ...countryOptions
-        });
+        res.json({ success: true, ...getAllCountryOptions() });
     } catch (err) {
-        console.error('Error fetching country options:', err.message);
-        res.status(500).json({ success: false, message: err.message });
+        next(err);
     }
 });
 
-// GET /api/squad/preview?country=IN (Preview 11-player roster for any country)
-router.get('/preview', (req, res) => {
+/** GET /api/squad/preview?country=IN */
+router.get('/preview', (req, res, next) => {
     try {
-        const countryCode = req.query.country || 'IN';
-        const squadData = getStartingSquadForCountry(countryCode);
-        res.json({
-            success: true,
-            ...squadData
-        });
+        const countryCode = String(req.query.country || 'IN').toUpperCase().slice(0, 10);
+        res.json({ success: true, ...getStartingSquadForCountry(countryCode) });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        next(err);
     }
 });
 
-// POST /api/squad/select-country (Change country and assign 11 starting players)
-router.post('/select-country', async (req, res) => {
+// --- Player-owned data -----------------------------------------------------
+
+router.use(requireAuth);
+
+/** POST /api/squad/select-country — picks a country and rebuilds the starting eleven. */
+router.post('/select-country', async (req, res, next) => {
     try {
-        const { countryCode, userId } = req.body;
-        const activeUserId = userId || 1;
+        const code = String(req.body.countryCode || 'IN').toUpperCase().slice(0, 10);
         const pool = getPool();
-        const code = (countryCode || 'IN').toUpperCase();
 
-        // 1. Update user country in users table
-        await pool.query('UPDATE users SET country_code = ? WHERE id = ?', [code, activeUserId]);
+        const squadInfo = getStartingSquadForCountry(code);
+        if (!squadInfo || !squadInfo.countryInfo) {
+            return res.status(400).json({ success: false, code: 'UNKNOWN_COUNTRY', message: 'That country is not available.' });
+        }
 
-        // 2. Generate and sync 11 fixed starting players in squad_cards
-        const squadData = await syncUserSquadForCountry(activeUserId, code);
+        await pool.query('UPDATE users SET country_code = ? WHERE id = ?', [code, req.userId]);
+        const squadData = await syncUserSquadForCountry(req.userId, code);
 
-        // 3. Fetch newly generated cards
-        const [cardsRaw] = await pool.query('SELECT * FROM squad_cards WHERE user_id = ? ORDER BY batting_order ASC, level DESC', [activeUserId]);
-        const cards = cardsRaw.map(c => ({
-            ...c,
-            name: c.card_name,
-            maxCopies: c.max_copies,
-            order: c.batting_order,
-            countryOrigin: c.country_origin,
-            originFlag: c.origin_flag,
-            active: Boolean(c.is_active)
-        }));
-
+        const [cardsRaw] = await pool.query(
+            'SELECT * FROM squad_cards WHERE user_id = ? ORDER BY batting_order ASC, level DESC',
+            [req.userId]
+        );
+        const cards = cardsRaw.map(toCard);
         const playing11 = cards.filter(c => c.batting_order > 0);
-        const teamPower = playing11.reduce((sum, p) => sum + (p.power || 0), 0);
 
         res.json({
             success: true,
@@ -65,134 +77,181 @@ router.post('/select-country', async (req, res) => {
             countryInfo: squadData.countryInfo,
             playing11,
             cards,
-            teamPower
+            teamPower: playing11.reduce((sum, p) => sum + (p.power || 0), 0)
         });
     } catch (err) {
-        console.error('SQL Error in select-country:', err.message);
-        res.status(500).json({ success: false, message: err.message });
+        next(err);
     }
 });
 
-// GET /api/squad from MySQL
-router.get('/', async (req, res) => {
+/** GET /api/squad — the caller's full collection, grouped for the squad screen. */
+router.get('/', async (req, res, next) => {
     try {
         const pool = getPool();
-        const userId = req.query.userId || 1;
 
-        // Get user country
-        const [users] = await pool.query('SELECT country_code, username FROM users WHERE id = ?', [userId]);
-        const userCountry = (users.length > 0 && users[0].country_code) ? users[0].country_code : 'IN';
+        const [users] = await pool.query('SELECT country_code FROM users WHERE id = ?', [req.userId]);
+        if (users.length === 0) {
+            return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Account not found.' });
+        }
+        const userCountry = users[0].country_code || 'IN';
 
-        // Check if user already has 11 starting players
-        let [cardsRaw] = await pool.query('SELECT * FROM squad_cards WHERE user_id = ? ORDER BY batting_order ASC, level DESC', [userId]);
-        let playing11Cards = cardsRaw.filter(c => c.batting_order > 0);
+        let [cardsRaw] = await pool.query(
+            'SELECT * FROM squad_cards WHERE user_id = ? ORDER BY batting_order ASC, level DESC',
+            [req.userId]
+        );
 
-        if (playing11Cards.length < 11) {
-            await syncUserSquadForCountry(userId, userCountry);
-            const [freshCards] = await pool.query('SELECT * FROM squad_cards WHERE user_id = ? ORDER BY batting_order ASC, level DESC', [userId]);
-            cardsRaw = freshCards;
+        // A new account, or one whose squad was cleared, gets its eleven built
+        // on first read rather than showing an empty screen.
+        if (cardsRaw.filter(c => c.batting_order > 0).length < SQUAD.playingEleven) {
+            await syncUserSquadForCountry(req.userId, userCountry);
+            [cardsRaw] = await pool.query(
+                'SELECT * FROM squad_cards WHERE user_id = ? ORDER BY batting_order ASC, level DESC',
+                [req.userId]
+            );
         }
 
-        const cards = cardsRaw.map(c => ({
-            ...c,
-            name: c.card_name,
-            maxCopies: c.max_copies,
-            order: c.batting_order,
-            countryOrigin: c.country_origin,
-            originFlag: c.origin_flag,
-            active: Boolean(c.is_active)
-        }));
+        const cards = cardsRaw.map(toCard);
+        const playing11 = cards
+            .filter(c => c.batting_order > 0)
+            .sort((a, b) => a.batting_order - b.batting_order);
 
-        const playing11 = cards.filter(c => c.batting_order > 0).sort((a, b) => a.batting_order - b.batting_order);
-        const bowlers = cards.filter(c => c.card_type === 'bowler' || c.role.toLowerCase().includes('bowler') || c.role.toLowerCase().includes('spinner') || c.role.toLowerCase().includes('fast'));
-        const batsmen = cards.filter(c => c.card_type === 'batsman' || c.card_type === 'wicket_keeper' || c.card_type === 'all_rounder' || c.card_name.includes('Bat'));
-        const ballSkins = cards.filter(c => c.card_type === 'ball_skin');
-
-        const teamPower = playing11.reduce((sum, p) => sum + (p.power || 0), 0);
-        const squadInfo = getStartingSquadForCountry(userCountry);
+        const isBowler = c => {
+            const role = (c.role || '').toLowerCase();
+            return c.card_type === 'bowler' || role.includes('bowler') || role.includes('spinner') || role.includes('fast');
+        };
 
         res.json({
             success: true,
             countryCode: userCountry,
-            countryInfo: squadInfo.countryInfo,
+            countryInfo: getStartingSquadForCountry(userCountry).countryInfo,
             playing11,
-            bowlers,
-            batsmen,
-            ballSkins,
-            teamPower,
+            bowlers: cards.filter(isBowler),
+            batsmen: cards.filter(c =>
+                ['batsman', 'wicket_keeper', 'all_rounder'].includes(c.card_type)),
+            ballSkins: cards.filter(c => c.card_type === 'ball_skin'),
+            teamPower: playing11.reduce((sum, p) => sum + (p.power || 0), 0),
             cards
         });
     } catch (err) {
-        console.error('SQL Error in squad route:', err.message);
-        res.status(500).json({ success: false, message: 'Database error fetching squad cards' });
+        next(err);
     }
 });
 
-// POST /api/squad/upgrade card in MySQL
-router.post('/upgrade', async (req, res) => {
+/** POST /api/squad/upgrade — spends coins to level a card the caller owns. */
+router.post('/upgrade', async (req, res, next) => {
+    const pool = getPool();
+    const conn = await pool.getConnection();
     try {
-        const { cardId, userId } = req.body;
-        const activeUserId = userId || 1;
-        const pool = getPool();
+        const cardId = parseInt(req.body.cardId, 10);
+        if (!Number.isInteger(cardId)) {
+            conn.release();
+            return res.status(400).json({ success: false, code: 'INVALID_CARD', message: 'A valid card is required.' });
+        }
 
-        const [cards] = await pool.query('SELECT * FROM squad_cards WHERE id = ? AND user_id = ?', [cardId, activeUserId]);
+        await conn.beginTransaction();
+
+        // Ownership is part of the WHERE clause, so a card id belonging to
+        // someone else simply does not resolve.
+        const [cards] = await conn.query(
+            'SELECT * FROM squad_cards WHERE id = ? AND user_id = ? FOR UPDATE',
+            [cardId, req.userId]
+        );
         if (cards.length === 0) {
-            return res.status(404).json({ success: false, message: 'Card not found' });
+            await conn.rollback();
+            return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Card not found.' });
         }
 
         const card = cards[0];
-        const costCoins = card.level * 400;
+        const costCoins = cardUpgradeCost(card.level);
 
-        // Check user coins
-        const [users] = await pool.query('SELECT coins FROM users WHERE id = ?', [activeUserId]);
-        if (users[0].coins < costCoins) {
-            return res.status(400).json({ success: false, message: 'Not enough coins to upgrade card' });
+        // applyWalletDelta refuses to overdraw inside the same transaction, so
+        // there is no window between checking the balance and spending it.
+        const wallet = await applyWalletDelta(req.userId, {
+            coins: -costCoins,
+            xp: SQUAD.xpPerUpgrade
+        }, conn);
+
+        if (!wallet) {
+            await conn.rollback();
+            return res.status(400).json({
+                success: false,
+                code: 'INSUFFICIENT_COINS',
+                message: `You need ${costCoins.toLocaleString()} coins to upgrade this card.`
+            });
         }
 
-        // Deduct coins & upgrade card in SQL
-        await pool.query('UPDATE users SET coins = coins - ?, xp = xp + 50 WHERE id = ?', [costCoins, activeUserId]);
-        await pool.query(`
-            UPDATE squad_cards 
-            SET level = level + 1, 
-                power = power + 5, 
-                copies = GREATEST(0, copies - max_copies),
-                max_copies = max_copies + 5
-            WHERE id = ?
-        `, [cardId]);
+        await conn.query(`
+            UPDATE squad_cards
+               SET level = level + 1,
+                   power = power + ?,
+                   copies = GREATEST(0, copies - max_copies),
+                   max_copies = max_copies + ?
+             WHERE id = ?
+        `, [SQUAD.powerPerUpgrade, SQUAD.maxCopiesIncrease, cardId]);
 
-        const [updatedCard] = await pool.query('SELECT * FROM squad_cards WHERE id = ?', [cardId]);
+        const [updatedCard] = await conn.query('SELECT * FROM squad_cards WHERE id = ?', [cardId]);
+        await conn.commit();
 
         res.json({
             success: true,
-            card: updatedCard[0],
+            card: toCard(updatedCard[0]),
             coinsDeducted: costCoins,
-            xpAwarded: 50,
+            xpAwarded: SQUAD.xpPerUpgrade,
+            balance: wallet.user.coins,
             message: `🎉 ${card.card_name} upgraded to Level ⭐ ${card.level + 1}!`
         });
     } catch (err) {
-        console.error('SQL Error in squad upgrade:', err.message);
-        res.status(500).json({ success: false, message: err.message });
+        await conn.rollback();
+        next(err);
+    } finally {
+        conn.release();
     }
 });
 
-// POST /api/squad/select card in match lineup
-router.post('/select', async (req, res) => {
+/** POST /api/squad/select — sets the active card for a slot. */
+router.post('/select', async (req, res, next) => {
+    const pool = getPool();
+    const conn = await pool.getConnection();
     try {
-        const { cardId, cardType, userId } = req.body;
-        const activeUserId = userId || 1;
-        const pool = getPool();
-
-        // If batsman, deactivate other batsmen
-        if (cardType === 'batsman') {
-            await pool.query('UPDATE squad_cards SET is_active = 0 WHERE user_id = ? AND card_type = "batsman"', [activeUserId]);
+        const cardId = parseInt(req.body.cardId, 10);
+        if (!Number.isInteger(cardId)) {
+            conn.release();
+            return res.status(400).json({ success: false, code: 'INVALID_CARD', message: 'A valid card is required.' });
         }
 
-        await pool.query('UPDATE squad_cards SET is_active = 1 WHERE id = ? AND user_id = ?', [cardId, activeUserId]);
+        await conn.beginTransaction();
 
-        res.json({ success: true, message: 'Card lineup updated in SQL' });
+        const [owned] = await conn.query(
+            'SELECT card_type FROM squad_cards WHERE id = ? AND user_id = ?',
+            [cardId, req.userId]
+        );
+        if (owned.length === 0) {
+            await conn.rollback();
+            return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Card not found.' });
+        }
+
+        // The card's own type decides which slot it fills. Taking `cardType`
+        // from the body let a client clear the wrong group.
+        const cardType = owned[0].card_type;
+        if (cardType === 'batsman') {
+            await conn.query(
+                "UPDATE squad_cards SET is_active = 0 WHERE user_id = ? AND card_type = 'batsman'",
+                [req.userId]
+            );
+        }
+
+        await conn.query(
+            'UPDATE squad_cards SET is_active = 1 WHERE id = ? AND user_id = ?',
+            [cardId, req.userId]
+        );
+
+        await conn.commit();
+        res.json({ success: true, message: 'Lineup updated.' });
     } catch (err) {
-        console.error('SQL Error in squad select:', err.message);
-        res.status(500).json({ success: false, message: err.message });
+        await conn.rollback();
+        next(err);
+    } finally {
+        conn.release();
     }
 });
 

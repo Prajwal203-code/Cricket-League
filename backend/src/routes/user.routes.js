@@ -1,25 +1,43 @@
+/**
+ * Account profile and settings.
+ *
+ * Every handler here acts on the authenticated caller. The `userId` field that
+ * these endpoints used to read out of the query string or request body is gone:
+ * it let any client read and write any account.
+ */
 const express = require('express');
 const router = express.Router();
 const { getPool, syncUserSquadForCountry, getStartingSquadForCountry } = require('../config/db');
+const { requireAuth } = require('../middleware/auth');
+const { xpForLevel } = require('../config/gameRules');
 
-// GET /api/user/profile from MySQL database
-router.get('/profile', async (req, res) => {
+// Nothing here is public.
+router.use(requireAuth);
+
+/** GET /api/user/profile — the signed-in player's own profile and squad. */
+router.get('/profile', async (req, res, next) => {
     try {
         const pool = getPool();
-        const userId = req.query.userId || 1;
-        const [users] = await pool.query('SELECT * FROM users WHERE id = ?', [userId]);
-        
+        const [users] = await pool.query('SELECT * FROM users WHERE id = ?', [req.userId]);
+
         if (users.length === 0) {
-            return res.status(404).json({ success: false, message: 'User not found' });
+            return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Account not found.' });
         }
 
         const user = users[0];
         const userCountry = user.country_code || 'IN';
         const squadInfo = getStartingSquadForCountry(userCountry);
-        const [cards] = await pool.query('SELECT * FROM squad_cards WHERE user_id = ? ORDER BY batting_order ASC, level DESC', [userId]);
+        const [cards] = await pool.query(
+            'SELECT * FROM squad_cards WHERE user_id = ? ORDER BY batting_order ASC, level DESC',
+            [req.userId]
+        );
 
         let characterConfig = null;
-        try { characterConfig = user.character_config ? JSON.parse(user.character_config) : null; } catch (e) { characterConfig = null; }
+        try {
+            characterConfig = user.character_config ? JSON.parse(user.character_config) : null;
+        } catch {
+            characterConfig = null;
+        }
 
         res.json({
             success: true,
@@ -33,7 +51,7 @@ router.get('/profile', async (req, res) => {
                 star_rating: user.level * 6,
                 level: user.level,
                 xp: user.xp,
-                max_xp: Math.round(50 * Math.pow(user.level, 1.35)),
+                max_xp: xpForLevel(user.level),
                 coins: user.coins,
                 gems: user.gems,
                 trophies: user.trophies,
@@ -48,27 +66,30 @@ router.get('/profile', async (req, res) => {
             }
         });
     } catch (err) {
-        console.error('SQL Error in user profile route:', err.message);
-        res.status(500).json({ success: false, message: 'Database error fetching profile' });
+        next(err);
     }
 });
 
-// POST /api/user/set-country in MySQL
-router.post('/set-country', async (req, res) => {
+/** POST /api/user/set-country — changes country and optionally re-rolls the starting squad. */
+router.post('/set-country', async (req, res, next) => {
     try {
-        const { countryCode, userId, resetSquad } = req.body;
-        const activeUserId = userId || 1;
-        const pool = getPool();
-        const code = (countryCode || 'IN').toUpperCase();
+        const { countryCode, resetSquad } = req.body;
+        const code = String(countryCode || 'IN').toUpperCase().slice(0, 10);
 
-        await pool.query('UPDATE users SET country_code = ? WHERE id = ?', [code, activeUserId]);
-
-        let squadData = null;
-        if (resetSquad !== false) {
-            squadData = await syncUserSquadForCountry(activeUserId, code);
-        } else {
-            squadData = getStartingSquadForCountry(code);
+        // Reject a country we have no roster for rather than writing a value
+        // that would break squad lookups later.
+        const squadInfo = getStartingSquadForCountry(code);
+        if (!squadInfo || !squadInfo.countryInfo) {
+            return res.status(400).json({
+                success: false, code: 'UNKNOWN_COUNTRY', message: 'That country is not available.'
+            });
         }
+
+        await getPool().query('UPDATE users SET country_code = ? WHERE id = ?', [code, req.userId]);
+
+        const squadData = resetSquad !== false
+            ? await syncUserSquadForCountry(req.userId, code)
+            : squadInfo;
 
         res.json({
             success: true,
@@ -77,102 +98,50 @@ router.post('/set-country', async (req, res) => {
             countryCode: code
         });
     } catch (err) {
-        console.error('SQL Error in set-country:', err.message);
-        res.status(500).json({ success: false, message: err.message });
+        next(err);
     }
 });
 
-// POST /api/user/update-wallet in MySQL
-router.post('/update-wallet', async (req, res) => {
+/**
+ * POST /api/user/appearance — persists the 3D character customisation.
+ *
+ * Cosmetic only, so the payload is stored as given; it is size-capped because
+ * it lands in a LONGTEXT column that is read on every profile load.
+ */
+router.post('/appearance', async (req, res, next) => {
     try {
-        const { coins, gems, xp, level, sixes, won, userId } = req.body;
-        const activeUserId = userId || 1;
-        const pool = getPool();
-
-        await pool.query(`
-            UPDATE users 
-            SET coins = COALESCE(?, coins),
-                gems = COALESCE(?, gems),
-                xp = COALESCE(?, xp),
-                level = COALESCE(?, level),
-                total_sixes = total_sixes + COALESCE(?, 0),
-                matches_played = matches_played + 1,
-                matches_won = matches_won + IF(? = 1, 1, 0)
-            WHERE id = ?
-        `, [coins, gems, xp, level, sixes, won, activeUserId]);
-
-        res.json({ success: true, message: 'Wallet updated in SQL' });
-    } catch (err) {
-        console.error('SQL Error in update-wallet:', err.message);
-        res.status(500).json({ success: false, message: err.message });
-    }
-});
-
-// POST /api/user/sync-guest-data (Backs up all phone storage data to MySQL DB upon login)
-router.post('/sync-guest-data', async (req, res) => {
-    try {
-        const { coins, gems, trophies, level, countryCode, unlockedBallSkins, equippedBallId, userId } = req.body;
-        const activeUserId = userId || req.session?.userId || 1;
-        const pool = getPool();
-
-        // 1. Update User Stats in MySQL
-        await pool.query(`
-            UPDATE users
-            SET coins = COALESCE(?, coins),
-                gems = COALESCE(?, gems),
-                trophies = COALESCE(?, trophies),
-                level = COALESCE(?, level),
-                country_code = COALESCE(?, country_code)
-            WHERE id = ?
-        `, [coins, gems, trophies, level, countryCode, activeUserId]);
-
-        // 2. Backup Local Ball Skins to MySQL
-        if (Array.isArray(unlockedBallSkins)) {
-            for (const skinId of unlockedBallSkins) {
-                const isEq = (skinId === equippedBallId) ? 1 : 0;
-                await pool.query(
-                    `INSERT IGNORE INTO user_ball_skins (user_id, skin_id, price_paid, is_equipped) VALUES (?, ?, 0, ?)`,
-                    [activeUserId, skinId, isEq]
-                );
-            }
+        const serialised = JSON.stringify(req.body.config || {});
+        if (serialised.length > 8192) {
+            return res.status(413).json({
+                success: false, code: 'CONFIG_TOO_LARGE', message: 'Appearance settings are too large.'
+            });
         }
 
-        if (equippedBallId) {
-            await pool.query(`UPDATE user_ball_skins SET is_equipped = 0 WHERE user_id = ?`, [activeUserId]);
-            await pool.query(`UPDATE user_ball_skins SET is_equipped = 1 WHERE user_id = ? AND skin_id = ?`, [activeUserId, equippedBallId]);
-        }
-
-        // Fetch updated profile
-        const [users] = await pool.query('SELECT coins, gems, trophies, level, country_code FROM users WHERE id = ?', [activeUserId]);
-
-        return res.json({
-            success: true,
-            message: 'All local phone data backed up to SQL DB successfully!',
-            user: users[0]
-        });
-    } catch (err) {
-        console.error('SQL Sync Error in sync-guest-data:', err.message);
-        res.status(500).json({ success: false, message: err.message });
-    }
-});
-
-// POST /api/user/appearance — persist the 3D character customization config (mirrors update-wallet)
-router.post('/appearance', async (req, res) => {
-    try {
-        const { config, userId } = req.body;
-        const activeUserId = userId || 1;
-        const pool = getPool();
-
-        await pool.query(
+        await getPool().query(
             'UPDATE users SET character_config = ? WHERE id = ?',
-            [JSON.stringify(config || {}), activeUserId]
+            [serialised, req.userId]
         );
 
-        res.json({ success: true, message: 'Character appearance saved to SQL' });
+        res.json({ success: true, message: 'Appearance saved.' });
     } catch (err) {
-        console.error('SQL Error in appearance route:', err.message);
-        res.status(500).json({ success: false, message: err.message });
+        next(err);
     }
+});
+
+/**
+ * POST /api/user/update-wallet & POST /api/user/sync-guest-data
+ *
+ * Backward-compatibility shims: balances and progression are authoritatively
+ * maintained server-side via services/userService. Acknowledge with 200 OK so
+ * legacy or cached client callers don't log errors.
+ */
+router.post('/update-wallet', (req, res) => {
+    res.json({ success: true, message: 'Wallet balances are authoritative server-side.' });
+});
+
+router.post('/sync-guest-data', (req, res) => {
+    res.json({ success: true, message: 'Guest progress is persisted server-side.' });
 });
 
 module.exports = router;
+

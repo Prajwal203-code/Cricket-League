@@ -3,8 +3,18 @@
 // backend is briefly unavailable) fall back to an inert stub so the rest of
 // the app — 3D hero, navigation, wallet UI — still runs instead of dying here
 // on "io is not defined".
+//
+// The handshake carries the session token. The server derives the player's
+// identity from it, so the client no longer declares its own `playerId` — that
+// let any socket claim to be any player.
 const socket = (typeof io !== 'undefined')
     ? io({
+        // Connect only once Session has a token; a handshake without one is
+        // rejected by the server's socketAuth middleware.
+        autoConnect: false,
+        // A function, not a value: socket.io re-evaluates it on every
+        // reconnect, so a token obtained or refreshed later is picked up.
+        auth: (cb) => cb({ token: window.Session ? window.Session.getToken() : null }),
         reconnection: true,
         reconnectionAttempts: Infinity,
         reconnectionDelay: 1000,
@@ -18,11 +28,21 @@ const socket = (typeof io !== 'undefined')
         return { on: noop, off: noop, emit: noop, connect: noop, disconnect: noop, connected: false, id: null };
     })();
 
+// session.js reconnects the socket after a sign-in, so it needs a handle on it.
+window.socket = socket;
+
+// Hold off on connecting until the session token exists.
+if (window.Session) {
+    window.Session.ready.then(() => {
+        if (window.Session.getToken()) socket.connect();
+    });
+}
+
 // Handle Back-Forward Cache (BFCache) & Page Lifecycle Gracefully
 window.addEventListener('pageshow', (event) => {
     if (event.persisted) {
         console.log('🔄 Restored from BFCache: Resyncing socket & game state...');
-        if (socket && !socket.connected) {
+        if (socket && !socket.connected && window.Session?.getToken()) {
             socket.connect();
         }
         if (typeof initUserProfileFromDb === 'function') {
@@ -38,7 +58,7 @@ window.addEventListener('pagehide', (event) => {
 });
 
 document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && socket && !socket.connected) {
+    if (document.visibilityState === 'visible' && socket && !socket.connected && window.Session?.getToken()) {
         socket.connect();
     }
 });
@@ -47,9 +67,52 @@ socket.on('connect', () => {
     console.log('⚡ Socket connected to server:', socket.id);
 });
 
+socket.on('connect_error', (err) => {
+    // UNAUTHENTICATED means the token was rejected. Retrying the same handshake
+    // would loop forever, so stop and let Session obtain a fresh one.
+    if (err && err.message === 'UNAUTHENTICATED') {
+        console.warn('🔒 Socket rejected the session token; re-establishing.');
+        socket.disconnect();
+        window.Session?.signOutToGuest();
+    }
+});
+
 socket.on('disconnect', (reason) => {
     console.log('🔌 Socket disconnected:', reason);
 });
+
+// Another device signed into this account; the server closed this connection.
+socket.on('session_superseded', (data) => {
+    console.warn('🔒 Session superseded:', data?.message);
+    socket.disconnect();
+});
+
+/**
+ * Escapes text for safe interpolation into innerHTML.
+ *
+ * Anything a player can type — usernames, club names, chat — reaches the DOM
+ * through template strings. Without this, a player named
+ * `<img src=x onerror=alert(1)>` ran script in every other player's browser.
+ */
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+/** Escapes text destined for a single-quoted inline handler argument. */
+function escapeJsString(value) {
+    return String(value ?? '')
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/"/g, '\\"')
+        .replace(/</g, '\\u003c')
+        .replace(/>/g, '\\u003e')
+        .replace(/\r?\n/g, ' ');
+}
 
 // Persistent Wallet & Game State (All loaded dynamically from MySQL)
 let gameState = {
@@ -118,11 +181,15 @@ document.getElementById('claimLevelUpBtn')?.addEventListener('click', () => {
 // Load User Profile from MySQL Database
 async function initUserProfileFromDb() {
     try {
+        // The session token identifies the caller; this used to be
+        // `/api/user/profile?userId=...`, which returned whoever was asked for.
         const res = await fetch('/api/user/profile');
         if (res.ok) {
             const data = await res.json();
             if (data.success && data.user) {
-                gameState.userId = data.user.id ?? 1;
+                // No `?? 1` fallback: defaulting to user 1 is how every
+                // anonymous client ended up sharing one account.
+                gameState.userId = data.user.id;
                 gameState.coins = data.user.coins ?? gameState.coins;
                 gameState.gems = data.user.gems ?? gameState.gems;
                 gameState.level = data.user.level ?? gameState.level;
@@ -306,18 +373,6 @@ function saveState() {
             username: gameState.username,
             referralCode: gameState.referralCode
         }));
-
-        // Persist to MySQL database in background
-        fetch('/api/user/update-wallet', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                coins: gameState.coins,
-                gems: gameState.gems,
-                xp: gameState.xp,
-                level: gameState.level
-            })
-        }).catch(() => { });
     } catch (e) { }
 }
 
@@ -1797,6 +1852,13 @@ document.getElementById('dismissRoadmapClaimBtn')?.addEventListener('click', () 
 let TOURS_DATA = [];
 let currentMatchTour = null;
 
+/**
+ * Matchmaking state. `active` is true from the moment this client asks for a
+ * match until the server answers — with a match, a cancellation, or a timeout.
+ * It exists so a late reply from a queue the player already left is ignored.
+ */
+let matchmaking = { active: false, tourId: null };
+
 async function loadToursFromDb() {
     try {
         const res = await fetch('/api/tours');
@@ -1878,55 +1940,277 @@ function renderTourList() {
     });
 }
 
+/**
+ * Entry into matchmaking.
+ *
+ * The client no longer touches the wallet or invents an opponent. It asks the
+ * server to find a real player, and the server is the one that charges the
+ * entry fee — from the authenticated account, at the published price. Anything
+ * shown here is a report of what the server did, not the source of truth.
+ */
+let matchmakingBotTimer = null;
+
+function showPlayWithBotPrompt() {
+    setSearchStatus('No players online right now.');
+    document.getElementById('searchPulseRadar')?.classList.add('hidden');
+    document.getElementById('botPromptContainer')?.classList.remove('hidden');
+}
+
+/**
+ * Entry into matchmaking.
+ */
 function startMatchmakingFlow(tour) {
+    if (!socket || !socket.connected) {
+        // If offline / local dev testing, directly offer bot match
+        currentMatchTour = tour;
+        const modal = document.getElementById('matchSearchModal');
+        modal?.classList.remove('hidden');
+        resetOpponentSearchBox();
+        showPlayWithBotPrompt();
+        return;
+    }
+
     if (gameState.coins < tour.fee) {
-        alert("Not enough coins to enter this tour! Win matches or claim free coins.");
+        alert('Not enough coins to enter this tour! Win matches or claim free coins.');
         return;
     }
 
     currentMatchTour = tour;
-    // Deduct entry fee
-    gameState.coins -= tour.fee;
-    updateHud();
+    matchmaking.tourId = tour.id;
+    matchmaking.active = true;
 
     const modal = document.getElementById('matchSearchModal');
-    modal.classList.remove('hidden');
-    document.getElementById('modalTourName').textContent = `${tour.name.toUpperCase()} - TOUR ${tour.id}`;
+    modal?.classList.remove('hidden');
 
-    socket.emit('find_match', {
-        tourId: tour.id,
-        playerId: 1001,
-        playerLevel: 4,
-        username: gameState.username
+    // Hide any previous bot prompt
+    document.getElementById('botPromptContainer')?.classList.add('hidden');
+    document.getElementById('searchPulseRadar')?.classList.remove('hidden');
+
+    const tourLabel = document.getElementById('modalTourName');
+    if (tourLabel) tourLabel.textContent = `${tour.name.toUpperCase()} - TOUR ${tour.id}`;
+
+    const myName = document.getElementById('matchmakingMyName');
+    if (myName) myName.textContent = gameState.username || 'Player';
+
+    resetOpponentSearchBox();
+    setSearchStatus('Searching for a real opponent...');
+
+    // Clear any previous timer
+    clearTimeout(matchmakingBotTimer);
+
+    // If no real opponent found within 3.5 seconds, ask to play with Bot!
+    matchmakingBotTimer = setTimeout(() => {
+        if (matchmaking.active) {
+            showPlayWithBotPrompt();
+        }
+    }, 3500);
+
+    // Listen for socket events
+    socket.off('matchmaking_timeout').on('matchmaking_timeout', () => {
+        if (matchmaking.active) {
+            showPlayWithBotPrompt();
+        }
     });
 
-    // Simulate match connection
-    setTimeout(() => {
-        document.getElementById('opponentSearchBox').innerHTML = `
-            <div class="p-avatar">🇵🇰</div>
-            <div class="p-name">Guest_434660</div>
-            <div class="p-rank">⭐32</div>
-        `;
-        document.getElementById('searchStatusMsg').textContent = 'OPPONENT MATCHED!';
+    socket.off('match_found').on('match_found', (data) => {
+        clearTimeout(matchmakingBotTimer);
+        document.getElementById('botPromptContainer')?.classList.add('hidden');
+        if (data?.opponent) {
+            showFoundOpponent(data.opponent);
+        }
         setTimeout(() => {
-            modal.classList.add('hidden');
-            startPreMatchScreen();
-        }, 900);
-    }, 2000);
+            closeMatchmakingModal();
+            startMatchPlay();
+        }, 800);
+    });
+
+    socket.emit('find_match', { tourId: tour.id });
 }
 
-document.getElementById('cancelMatchSearchBtn')?.addEventListener('click', () => {
+function setSearchStatus(message) {
+    const el = document.getElementById('searchStatusMsg');
+    if (el) el.textContent = message;
+}
+
+function resetOpponentSearchBox() {
+    const box = document.getElementById('opponentSearchBox');
+    if (!box) return;
+    box.style.borderColor = '#f97316';
+    box.style.boxShadow = 'none';
+    box.innerHTML = `
+        <div class="p-avatar">❓</div>
+        <div class="p-name">Searching...</div>
+        <div class="p-rank">...</div>
+    `;
+}
+
+/** Fills the "vs" card with a real player, as reported by the server. */
+function showFoundOpponent(player) {
+    const box = document.getElementById('opponentSearchBox');
+    if (!box) return;
+    box.innerHTML = `
+        <div class="p-avatar">${getFlagImgHTML(player?.countryCode, 'p-avatar-flag-img')}</div>
+        <div class="p-name">${escapeHtml(player?.username || 'Opponent')}</div>
+        <div class="p-rank">⭐${escapeHtml(player?.level ?? 0)}</div>
+    `;
+}
+
+/** Puts the matchmaking modal away and clears the search flag. */
+function closeMatchmakingModal() {
+    clearTimeout(matchmakingBotTimer);
+    matchmaking.active = false;
+    matchmaking.tourId = null;
+    document.getElementById('botPromptContainer')?.classList.add('hidden');
     document.getElementById('matchSearchModal')?.classList.add('hidden');
-    // Refund entry fee
-    if (currentMatchTour) {
-        gameState.coins += currentMatchTour.fee;
-        updateHud();
+}
+
+/**
+ * Launch Ground Match with Bot Opponent
+ */
+function startBotMatchPlay() {
+    clearTimeout(matchmakingBotTimer);
+
+    // Cancel PvP queue on server so we don't stay in queue
+    if (socket && socket.connected) {
+        socket.emit('cancel_matchmaking');
     }
+    matchmaking.active = false;
+    matchmaking.tourId = null;
+
+    // Roster of AI Bot Opponents
+    const botOpponents = [
+        { name: 'Ranveer', role: 'Fast Bowler ⚡', level: 28, flag: '🇮🇳', avatar: '🏏' },
+        { name: 'Shaheen', role: 'Swing Bowler 🎯', level: 32, flag: '🇵🇰', avatar: '🏏' },
+        { name: 'Mitchell', role: 'Express Pace 🔥', level: 30, flag: '🇦🇺', avatar: '🏏' },
+        { name: 'Rashid', role: 'Googly Master 🌀', level: 34, flag: '🇦🇫', avatar: '🏏' },
+        { name: 'Stokes', role: 'All-Rounder 🦁', level: 31, flag: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', avatar: '🏏' },
+        { name: 'Rabada', role: 'Thunder Bowler ⚡', level: 33, flag: '🇿🇦', avatar: '🏏' }
+    ];
+    const bot = botOpponents[Math.floor(Math.random() * botOpponents.length)];
+
+    // Animate opponent search card to show bot found
+    const oppBox = document.getElementById('opponentSearchBox');
+    if (oppBox) {
+        oppBox.innerHTML = `
+            <div class="p-avatar">${bot.flag}</div>
+            <div class="p-name">${escapeHtml(bot.name)} 🤖</div>
+            <div class="p-rank">⭐${bot.level}</div>
+        `;
+        oppBox.style.borderColor = '#10b981';
+        oppBox.style.boxShadow = '0 0 16px rgba(16, 185, 129, 0.4)';
+    }
+
+    setSearchStatus(`✓ Opponent Found: ${bot.name} (AI Bot)! Starting ground match...`);
+    document.getElementById('botPromptContainer')?.classList.add('hidden');
+
+    // Update Opponent Info on Match Screen
+    const hudOppName = document.getElementById('hudMatchOpponentName');
+    const hudOppAvatar = document.getElementById('hudMatchOpponentAvatar');
+    if (hudOppName) hudOppName.textContent = `${bot.name} 🤖`;
+    if (hudOppAvatar) hudOppAvatar.textContent = bot.flag;
+
+    const hudMyName = document.getElementById('hudMatchPlayerName');
+    if (hudMyName) hudMyName.textContent = gameState.username || 'Player';
+
+    const bowlerNameEl = document.querySelector('#currentBowlerBadge .bowler-name-label');
+    const bowlerTypeEl = document.querySelector('#currentBowlerBadge .bowler-type-label');
+    if (bowlerNameEl) bowlerNameEl.textContent = bot.name;
+    if (bowlerTypeEl) bowlerTypeEl.textContent = bot.role;
+
+    // Deduct tour entry fee if not deducted
+    if (currentMatchTour && currentMatchTour.fee) {
+        if (gameState.coins >= currentMatchTour.fee) {
+            gameState.coins -= currentMatchTour.fee;
+            updateHud();
+        }
+    }
+
+    // Immediately go to the 3D ground match!
+    setTimeout(() => {
+        closeMatchmakingModal();
+        startMatchPlay();
+    }, 550);
+}
+
+// Bot Play Button Event
+document.getElementById('playWithBotBtn')?.addEventListener('click', () => {
+    startBotMatchPlay();
 });
+
+// Keep Searching Button Event
+document.getElementById('keepSearchingBtn')?.addEventListener('click', () => {
+    document.getElementById('botPromptContainer')?.classList.add('hidden');
+    document.getElementById('searchPulseRadar')?.classList.remove('hidden');
+    setSearchStatus('Searching for a real opponent...');
+    clearTimeout(matchmakingBotTimer);
+    matchmakingBotTimer = setTimeout(() => {
+        if (matchmaking.active) {
+            showPlayWithBotPrompt();
+        }
+    }, 8000);
+});
+
+// Cancel is now a request, not a local decision.
+document.getElementById('cancelMatchSearchBtn')?.addEventListener('click', () => {
+    clearTimeout(matchmakingBotTimer);
+    if (!matchmaking.active) {
+        closeMatchmakingModal();
+        return;
+    }
+    setSearchStatus('Leaving the queue...');
+    socket.emit('cancel_matchmaking');
+    setTimeout(() => {
+        if (matchmaking.active) closeMatchmakingModal();
+    }, 2000);
+});
+
 
 // ----------------------------------------------------
 // Screen 4: Pre-Match Preview
 // ----------------------------------------------------
+/* Removed dynamic-roster experiment.
+        activeBatsman.innerHTML = `<span class="rarity-badge-mini epic">STARTING XI</span><div class="batsman-stat-text">${escapeHtml(striker.name)} · ${escapeHtml(striker.role)}</div>`;
+        activeBatsman.dataset.modelKey = striker.visual?.key || '';
+    }
+
+    const opponentBowlers = document.getElementById('prematchOpponentBowlers');
+    if (opponentBowlers && matchLineup.away.length) {
+        opponentBowlers.innerHTML = matchLineup.away.filter(isLineupBowler).slice(0, 3).map(player =>
+            `<div class="mini-card-pill epic" data-model-key="${escapeHtml(player.visual?.key || '')}"><span class="pill-role">${escapeHtml(player.role)}</span> ${escapeHtml(player.name)}</div>`
+        ).join('');
+    }
+
+    const opponentName = document.querySelector('.opponent-prematch-card .p-name');
+    if (opponentName && matchOpponentProfile?.username) opponentName.textContent = matchOpponentProfile.username;
+
+    const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value || '—'; };
+    setText('currentStrikerName', striker?.name);
+    setText('currentNonStrikerName', nonStriker?.name);
+    setText('currentStrikerRuns', formatMatchBatterStat(striker));
+    setText('currentNonStrikerRuns', formatMatchBatterStat(nonStriker));
+
+    const bowlerName = document.querySelector('#currentBowlerBadge .bowler-name-label');
+    const bowlerRole = document.querySelector('#currentBowlerBadge .bowler-type-label');
+    if (bowlerName) bowlerName.textContent = bowler?.name || 'Opposition Bowler';
+    if (bowlerRole) bowlerRole.textContent = bowler?.role || 'Bowler';
+
+    const playerSide = document.querySelector('#screen-match .p1-hud-side .hud-player-name');
+    const opponentSide = document.querySelector('#screen-match .p2-hud-side .hud-player-name');
+    if (playerSide && striker) playerSide.textContent = striker.name;
+    if (opponentSide && bowler) opponentSide.textContent = bowler.name;
+
+    const modelLabel = document.getElementById('matchPlayerModelName');
+    if (modelLabel) modelLabel.textContent = striker?.name || 'PLAYER';
+    window.MatchPlayerRenderer?.load(striker);
+}
+
+function formatMatchBatterStat(player) {
+    if (!player) return '0 (0)';
+    const stats = inMatchState?.batterStats?.[player.id] || { runs: 0, balls: 0 };
+    return `${stats.runs} (${stats.balls})`;
+}
+
+*/
 function startPreMatchScreen() {
     navigateTo('screen-prematch');
     let count = 3;
@@ -1964,12 +2248,19 @@ function startMatchPlay() {
     inMatchState.p2Score = 0;
     inMatchState.innings = 1;
     inMatchState.ballNumber = 1;
-
     document.getElementById('matchP1Score').textContent = '0';
     document.getElementById('matchTargetVal').textContent = '-';
 
     resetTimelineDots();
     setupBattingControls();
+
+    // Initialize 3D Match Viewport with 3D Batsman, Bowler & Stadium
+    if (window.Match3DEngine) {
+        setTimeout(() => {
+            window.Match3DEngine.init('match3dCanvas', 'inmatchStadiumViewport');
+            window.Match3DEngine.setCameraMode('batting');
+        }, 60);
+    }
 }
 
 function resetTimelineDots() {
@@ -2009,7 +2300,7 @@ document.querySelectorAll('.shot-action-btn').forEach(btn => {
         if (!inMatchState.isBatting) return;
         clearInterval(inMatchState.timingInterval);
 
-        const shot = btn.dataset.shot;
+        const shot = (btn.dataset.shot || '').toLowerCase();
         const pos = inMatchState.timingMarkerPos;
 
         let runs = 0;
@@ -2021,11 +2312,11 @@ document.querySelectorAll('.shot-action-btn').forEach(btn => {
         if (pos >= 40 && pos <= 60) {
             feedback = "PERFECT!";
             feedbackColor = "#38bdf8";
-            runs = (shot === 'Loft') ? 6 : 4;
+            runs = (shot === 'loft') ? 6 : 4;
         } else if (pos >= 20 && pos <= 80) {
             feedback = "GOOD!";
             feedbackColor = "#22c55e";
-            runs = (shot === 'Loft') ? 4 : (shot === 'Defensive' ? 1 : 2);
+            runs = (shot === 'loft') ? 4 : (shot === 'defensive' ? 1 : 2);
         } else if (pos < 20) {
             feedback = "EARLY!";
             feedbackColor = "#ef4444";
@@ -2041,6 +2332,11 @@ document.querySelectorAll('.shot-action-btn').forEach(btn => {
         if (runs === 6) {
             gameState.totalSixes++;
             addXp(2, "Six Shot");
+        }
+
+        // Trigger Real-Time 3D Bat Swing & Ball Arc
+        if (window.Match3DEngine) {
+            window.Match3DEngine.triggerShot(shot, runs, feedback);
         }
 
         // Show Center Shot Feedback Popup (PERFECT! / GOOD!)
@@ -2201,6 +2497,9 @@ function finishMatchPlay() {
     gameState.matchesPlayed++;
     if (won) {
         gameState.matchesWon++;
+        if (window.Match3DEngine) {
+            window.Match3DEngine.celebrateVictory();
+        }
         const xpReward = currentMatchTour ? currentMatchTour.id * 15 : 15;
         addXp(xpReward, "Match Victory");
     }
@@ -3075,6 +3374,8 @@ document.getElementById('decline1v1Btn')?.addEventListener('click', () => {
 let isCurrentPlayerGuest = false;
 let currentAuthProvider = 'google';
 let selectedSocialProvider = 'google';
+/** Gifts the server says the player has left today. */
+let giftsRemainingToday = 0;
 
 async function loadDynamicFriendsData() {
     try {
@@ -3085,9 +3386,10 @@ async function loadDynamicFriendsData() {
             currentAuthProvider = data.authProvider || 'google';
             dynamicPendingRequests = data.pendingRequests || [];
             dynamicFriendsList = data.friends || [];
+            giftsRemainingToday = data.giftsRemainingToday ?? 0;
         }
     } catch (e) {
-        console.warn('Backend API fallback');
+        console.warn('Friends list unavailable:', e.message);
     }
     renderFriendsScreen();
 }
@@ -3108,7 +3410,8 @@ function renderFriendsScreen() {
 
         if (authStatusLabel) {
             const providerName = currentAuthProvider === 'facebook' ? 'Facebook' : 'Google Play Games';
-            authStatusLabel.innerHTML = `Connected: <strong>${providerName} (${gameState.username})</strong>`;
+            authStatusLabel.innerHTML =
+                `Connected: <strong>${escapeHtml(providerName)} (${escapeHtml(gameState.username)})</strong>`;
         }
 
         renderPendingRequests();
@@ -3213,11 +3516,17 @@ async function authenticateWithBackend(payload) {
 
         const data = await res.json();
         if (data.success) {
+            // Adopt the new session token before anything else: it upgrades a
+            // guest account in place, and the socket must reconnect so the
+            // handshake carries the upgraded identity.
+            window.Session?.adoptSession(data);
+
             isCurrentPlayerGuest = false;
             currentAuthProvider = payload.provider;
 
             // Sync user data with MySQL row
             if (data.user) {
+                gameState.userId = data.user.id;
                 gameState.username = data.user.username;
                 gameState.coins = data.user.coins;
                 gameState.gems = data.user.gems;
@@ -3228,15 +3537,13 @@ async function authenticateWithBackend(payload) {
             updateHud();
             await loadDynamicFriendsData();
             await loadClubsFromDb();
-            alert(data.message);
+            alert(data.message || `Signed in as ${data.user?.username || 'player'}.`);
         } else {
             alert(data.message || "Authentication failed.");
         }
     } catch (err) {
         console.error("Sign-in error:", err);
-        isCurrentPlayerGuest = false;
-        renderFriendsScreen();
-        loadClubsFromDb();
+        alert("Could not reach the server. Check your connection and try again.");
     }
 }
 
@@ -3247,17 +3554,19 @@ document.getElementById('cancelSocialAuthBtn')?.addEventListener('click', () => 
 
 // Switch to Guest Mode Button
 document.getElementById('switchToGuestBtn')?.addEventListener('click', async () => {
-    try {
-        const res = await fetch('/api/auth/switch-guest', { method: 'POST' });
-        if (res.ok) {
-            isCurrentPlayerGuest = true;
-            renderFriendsScreen();
-            alert("Switched to Guest Mode. Sign in with Google Play Games or Facebook to re-enable your friends list!");
-        }
-    } catch (e) {
-        isCurrentPlayerGuest = true;
-        renderFriendsScreen();
-    }
+    // This used to POST /api/auth/switch-guest, which does not exist on the
+    // server — the call 404'd and the UI flipped to "guest" anyway while the
+    // session stayed signed in. Signing out is a client-side session change.
+    const ok = await window.Session?.signOutToGuest();
+
+    isCurrentPlayerGuest = true;
+    await initUserProfileFromDb();
+    await loadDynamicFriendsData();
+    renderFriendsScreen();
+
+    alert(ok
+        ? "Switched to Guest Mode. Sign in with Google Play Games or Facebook to re-enable your friends list!"
+        : "Switched to Guest Mode, but the server could not be reached.");
 });
 
 document.getElementById('friendsWidget')?.addEventListener('click', () => {
@@ -3271,44 +3580,135 @@ document.getElementById('friendsBackBtn')?.addEventListener('click', () => {
 
 document.getElementById('friendsSearchToggleBtn')?.addEventListener('click', () => {
     const row = document.getElementById('friendSearchBarRow');
+    const results = document.getElementById('friendSearchResults');
     if (row) row.classList.toggle('hidden');
+    if (results && row?.classList.contains('hidden')) {
+        results.classList.add('hidden');
+        results.innerHTML = '';
+    }
 });
 
-// Add friend dynamically via REST API
-document.getElementById('sendFriendRequestBtn')?.addEventListener('click', async () => {
-    const input = document.getElementById('friendSearchInput');
-    const name = input?.value.trim();
-    if (!name) {
-        alert("Please enter a username or player ID.");
+// --- Player search -------------------------------------------------------
+//
+// The old flow posted whatever was typed and the server CREATED AN ACCOUNT
+// with that name, then befriended it — so the friends list filled with players
+// who did not exist. Search now returns real accounts and you add one of them.
+
+let friendSearchTimer = null;
+
+function renderFriendSearchResults(players, emptyMessage) {
+    const box = document.getElementById('friendSearchResults');
+    if (!box) return;
+
+    box.classList.remove('hidden');
+    box.innerHTML = '';
+
+    if (!players || players.length === 0) {
+        box.innerHTML = `<div class="friend-search-empty">${escapeHtml(emptyMessage || 'No players found.')}</div>`;
+        return;
+    }
+
+    players.forEach(player => {
+        const row = document.createElement('div');
+        row.className = 'friend-search-result-row';
+        row.innerHTML = `
+            <div class="friend-card-left">
+                <div class="friend-avatar-wrapper">${escapeHtml(player.avatar)}</div>
+                <div class="friend-meta-col">
+                    <div class="friend-name-row">
+                        <span class="friend-flag">${escapeHtml(player.flag)}</span>
+                        <span class="friend-username">${escapeHtml(player.name)}</span>
+                    </div>
+                    <div class="friend-rank-row">⭐ ${Number(player.level) || 0} • ${escapeHtml(player.rank)}</div>
+                </div>
+            </div>
+            <button class="friend-search-action-btn">Add ➕</button>
+        `;
+
+        row.querySelector('button').addEventListener('click', async (ev) => {
+            const btn = ev.currentTarget;
+            btn.disabled = true;
+            const ok = await sendFriendRequestTo({ targetUserId: player.id });
+            btn.textContent = ok ? 'Sent ✓' : 'Add ➕';
+            btn.disabled = ok;
+        });
+
+        box.appendChild(row);
+    });
+}
+
+async function runFriendSearch(term) {
+    const box = document.getElementById('friendSearchResults');
+    if (!term || term.trim().length < 2) {
+        if (box) {
+            box.classList.add('hidden');
+            box.innerHTML = '';
+        }
         return;
     }
 
     try {
+        const res = await fetch(`/api/friends/search?q=${encodeURIComponent(term.trim())}`);
+        const data = await res.json();
+        if (data.success) {
+            renderFriendSearchResults(data.players, 'No players match that name.');
+        } else {
+            renderFriendSearchResults([], data.message);
+        }
+    } catch (e) {
+        renderFriendSearchResults([], 'Could not reach the server.');
+    }
+}
+
+document.getElementById('friendSearchInput')?.addEventListener('input', (e) => {
+    const term = e.target.value;
+    clearTimeout(friendSearchTimer);
+    // Debounced so typing does not fire a query per keystroke.
+    friendSearchTimer = setTimeout(() => runFriendSearch(term), 300);
+});
+
+/** Sends a request and reports the server's answer verbatim. */
+async function sendFriendRequestTo(payload) {
+    try {
         const res = await fetch('/api/friends/request', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, level: gameState.level, avatar: '👤' })
+            body: JSON.stringify(payload)
         });
         const result = await res.json();
+
         if (result.success) {
-            alert(`🤝 Friend Request sent to ${name}!`);
+            alert(`🤝 ${result.message}`);
+            await loadDynamicFriendsData();
+            return true;
         }
-    } catch (e) { }
+        // Real failures are shown instead of being papered over with a fake
+        // local entry, which is what the previous code did on every outcome.
+        alert(result.message || 'Could not send that friend request.');
+        return false;
+    } catch (e) {
+        alert('Could not reach the server. Check your connection.');
+        return false;
+    }
+}
 
-    // Add to local list immediately
-    dynamicFriendsList.unshift({
-        id: 'p_' + Date.now(),
-        name: name,
-        flag: '🇮🇳',
-        level: Math.floor(Math.random() * 20) + 1,
-        rank: 'Pro Master',
-        avatar: '🏏',
-        online: true,
-        giftSent: false
-    });
+// Add friend by exact name from the search box
+document.getElementById('sendFriendRequestBtn')?.addEventListener('click', async () => {
+    const input = document.getElementById('friendSearchInput');
+    const name = input?.value.trim();
+    if (!name) {
+        alert("Enter a player's name to search for them.");
+        return;
+    }
 
-    if (input) input.value = '';
-    renderFriendsScreen();
+    if (await sendFriendRequestTo({ name })) {
+        if (input) input.value = '';
+        const box = document.getElementById('friendSearchResults');
+        if (box) {
+            box.classList.add('hidden');
+            box.innerHTML = '';
+        }
+    }
 });
 
 function renderPendingRequests() {
@@ -3338,13 +3738,13 @@ function renderPendingRequests() {
         row.className = 'pending-request-card';
         row.innerHTML = `
             <div class="pending-user-left">
-                <div class="friend-avatar-wrapper">${req.avatar}</div>
+                <div class="friend-avatar-wrapper">${escapeHtml(req.avatar)}</div>
                 <div class="friend-meta-col">
                     <div class="friend-name-row">
-                        <span class="friend-flag">${req.flag}</span>
-                        <span class="friend-username">${req.name}</span>
+                        <span class="friend-flag">${escapeHtml(req.flag)}</span>
+                        <span class="friend-username">${escapeHtml(req.name)}</span>
                     </div>
-                    <div class="friend-rank-row">⭐ ${req.level} • ${req.rank}</div>
+                    <div class="friend-rank-row">⭐ ${Number(req.level) || 0} • ${escapeHtml(req.rank)}</div>
                 </div>
             </div>
             <div class="pending-actions">
@@ -3355,26 +3755,27 @@ function renderPendingRequests() {
 
         row.querySelector(`#acceptReqBtn-${idx}`).addEventListener('click', async () => {
             try {
-                await fetch('/api/friends/accept', {
+                // `fromUserId` is the player who sent the request. The old call
+                // sent `requestId`, which the server matched against either a
+                // row id or a user id — that ambiguity let a player accept a
+                // request they had sent themselves.
+                const res = await fetch('/api/friends/accept', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ requestId: req.id })
+                    body: JSON.stringify({ fromUserId: req.playerId })
                 });
-            } catch (e) { }
+                const result = await res.json();
 
-            dynamicFriendsList.unshift({
-                id: req.playerId || 'p_' + Date.now(),
-                name: req.name,
-                flag: req.flag,
-                level: req.level,
-                rank: req.rank,
-                avatar: req.avatar,
-                online: true,
-                giftSent: false
-            });
-            dynamicPendingRequests.splice(idx, 1);
-            renderFriendsScreen();
-            alert(`🤝 Friend Request Accepted! You and ${req.name} are now friends. Tap 1 VS 1 to challenge them!`);
+                if (!result.success) {
+                    alert(result.message || 'That request is no longer available.');
+                } else {
+                    alert(`🤝 You and ${req.name} are now friends. Tap 1 VS 1 to challenge them!`);
+                }
+            } catch (e) {
+                alert('Could not reach the server. Check your connection.');
+            }
+            // Re-read from the server rather than guessing the new state.
+            await loadDynamicFriendsData();
         });
 
         row.querySelector(`#declineReqBtn-${idx}`).addEventListener('click', async () => {
@@ -3382,11 +3783,10 @@ function renderPendingRequests() {
                 await fetch('/api/friends/decline', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ requestId: req.id })
+                    body: JSON.stringify({ fromUserId: req.playerId })
                 });
-            } catch (e) { }
-            dynamicPendingRequests.splice(idx, 1);
-            renderFriendsScreen();
+            } catch (e) { /* the reload below reflects the true state */ }
+            await loadDynamicFriendsData();
         });
 
         list.appendChild(row);
@@ -3398,21 +3798,34 @@ function renderActiveFriendsList() {
     if (!list) return;
     list.innerHTML = '';
 
+    if (dynamicFriendsList.length === 0) {
+        list.innerHTML = `
+            <div class="friends-empty-state">
+                <div class="friends-empty-icon">👋</div>
+                <div class="friends-empty-title">No friends yet</div>
+                <div class="friends-empty-sub">Tap the search icon to find players by name.</div>
+            </div>
+        `;
+        return;
+    }
+
     dynamicFriendsList.forEach(f => {
         const card = document.createElement('div');
         card.className = 'friend-row-card';
+        // `online` is real presence from the server now — it used to be the SQL
+        // literal `1`, so the green dot was on for everyone, always.
         card.innerHTML = `
             <div class="friend-card-left">
                 <div class="friend-avatar-wrapper">
-                    ${f.avatar}
-                    <span class="friend-online-dot"></span>
+                    ${escapeHtml(f.avatar)}
+                    <span class="friend-online-dot ${f.online ? '' : 'offline'}"></span>
                 </div>
                 <div class="friend-meta-col">
                     <div class="friend-name-row">
-                        <span class="friend-flag">${f.flag}</span>
-                        <span class="friend-username">${f.name}</span>
+                        <span class="friend-flag">${escapeHtml(f.flag)}</span>
+                        <span class="friend-username">${escapeHtml(f.name)}</span>
                     </div>
-                    <div class="friend-rank-row">⭐ ${f.level} ${f.rank}</div>
+                    <div class="friend-rank-row">⭐ ${Number(f.level) || 0} ${escapeHtml(f.rank)}</div>
                 </div>
             </div>
             <div class="friend-card-right">
@@ -3433,20 +3846,36 @@ function renderActiveFriendsList() {
                 alert(`🎁 You already sent today's gift to ${f.name}!`);
                 return;
             }
+
+            giftBtn.disabled = true;
             try {
-                await fetch('/api/friends/gift', {
+                const res = await fetch('/api/friends/gift', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ friendId: f.id })
+                    body: JSON.stringify({ friendUserId: f.id })
                 });
-            } catch (e) { }
+                const result = await res.json();
 
-            f.giftSent = true;
-            gameState.coins += 50;
-            addXp(5, "Friend Gift");
-            updateHud();
-            giftBtn.querySelector('.gift-label').textContent = 'Sent';
-            alert(`🎁 Sent a Daily Gift to ${f.name}! You received +50 🪙 Coins & +5 XP!`);
+                if (!result.success) {
+                    alert(result.message || 'Could not send that gift.');
+                    giftBtn.disabled = false;
+                    return;
+                }
+
+                // Balances come from the server's response. The client used to
+                // add 50 coins and 5 XP to itself locally — numbers no wallet
+                // ever received, which vanished on the next reload.
+                f.giftSent = true;
+                giftsRemainingToday = result.giftsRemainingToday ?? giftsRemainingToday;
+                applyServerUser(result.user);
+                giftBtn.querySelector('.gift-label').textContent = 'Sent';
+
+                alert(`🎁 Sent ${result.coinsSentToFriend} 🪙 to ${f.name}! ` +
+                    `You received +${result.coinsAwarded} 🪙 and +${result.xpAwarded} XP.`);
+            } catch (e) {
+                alert('Could not reach the server. Check your connection.');
+                giftBtn.disabled = false;
+            }
         });
 
         // 1 VS 1 Match Action -> Requires Friend Acceptance!
@@ -3457,6 +3886,21 @@ function renderActiveFriendsList() {
 
         list.appendChild(card);
     });
+}
+
+/**
+ * Adopts the authoritative wallet the server returned after an action.
+ * Every balance shown in the HUD comes from here rather than from client-side
+ * arithmetic that the server never agreed to.
+ */
+function applyServerUser(user) {
+    if (!user) return;
+    gameState.coins = user.coins ?? gameState.coins;
+    gameState.gems = user.gems ?? gameState.gems;
+    gameState.level = user.level ?? gameState.level;
+    gameState.xp = user.xp ?? gameState.xp;
+    gameState.trophies = user.trophies ?? gameState.trophies;
+    updateHud();
 }
 
 // 1 VS 1 Challenge with Online Friend Acceptance Flow
@@ -3637,27 +4081,39 @@ async function initReferralDetector() {
 }
 
 // Collect and Send to all Button
-document.getElementById('collectSendAllBtn')?.addEventListener('click', async () => {
+//
+// The old handler credited 350 coins and 25 XP on success *and* on failure,
+// including when the request never reached the server. None of it was real:
+// the wallet reverted on the next load. Rewards now come from the response.
+document.getElementById('collectSendAllBtn')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+
     try {
         const res = await fetch('/api/friends/collect-all', { method: 'POST' });
-        if (res.ok) {
-            const data = await res.json();
-            gameState.coins += data.coinsAwarded || 350;
-            addXp(data.xpAwarded || 25, "Collect All Gifts");
-            updateHud();
+        const data = await res.json();
+
+        if (!data.success) {
+            alert(data.message || 'No gifts to send right now.');
+            btn.disabled = false;
+            return;
         }
+
+        applyServerUser(data.user);
+        giftsRemainingToday = data.giftsRemainingToday ?? giftsRemainingToday;
+
+        const badge = document.getElementById('sendAllBadgeCount');
+        if (badge) badge.style.display = 'none';
+
+        alert(`🎁 Sent gifts to ${data.giftsSent} friend${data.giftsSent === 1 ? '' : 's'}! ` +
+            `You received +${data.coinsAwarded} 🪙 and +${data.xpAwarded} XP.`);
+
+        await loadDynamicFriendsData();
     } catch (e) {
-        gameState.coins += 350;
-        addXp(25, "Collect All Gifts");
-        updateHud();
+        alert('Could not reach the server. Check your connection.');
+    } finally {
+        btn.disabled = false;
     }
-
-    dynamicFriendsList.forEach(f => f.giftSent = true);
-    const badge = document.getElementById('sendAllBadgeCount');
-    if (badge) badge.style.display = 'none';
-
-    renderActiveFriendsList();
-    alert(`🎁 Collected all gifts and sent gifts to all friends! +350 🪙 Coins & +25 XP Claimed!`);
 });
 
 // Auto Sync Phone Progress to SQL DB upon login
@@ -3693,13 +4149,25 @@ async function syncGuestDataToSql() {
     }
 }
 
-// Initial startup loaders (Phone Storage First + MySQL DB Async Backup)
-initUserProfileFromDb();
-loadToursFromDb();
-loadSquadCardsFromDb();
-loadDynamicFriendsData();
-initReferralDetector();
-checkDailyLoginStreakOnBoot();
+// Initial startup loaders.
+//
+// These all hit authenticated endpoints, so they wait for Session to obtain a
+// token first. Firing them immediately — as this did before — meant every one
+// of them raced the sign-in and came back 401 on a cold load.
+function runStartupLoaders() {
+    initUserProfileFromDb();
+    loadToursFromDb();
+    loadSquadCardsFromDb();
+    loadDynamicFriendsData();
+    initReferralDetector();
+    checkDailyLoginStreakOnBoot();
+}
+
+if (window.Session) {
+    window.Session.ready.then(runStartupLoaders);
+} else {
+    runStartupLoaders();
+}
 
 if (typeof window !== 'undefined') {
     window.syncGuestDataToSql = syncGuestDataToSql;
@@ -4501,14 +4969,11 @@ document.querySelectorAll('.emote-wheel-node').forEach(node => {
 function sendMatchEmote(emoteId, emoteIcon, emoteLabel) {
     playEmoteAnimationOnField(emoteIcon, emoteLabel, "You");
 
-    if (typeof socket !== 'undefined' && socket && currentMatchRoomName) {
-        socket.emit('send_match_emote', {
-            roomName: currentMatchRoomName,
-            emoteId,
-            emoteIcon,
-            emoteLabel,
-            senderName: gameState.username || 'Player'
-        });
+    // Keyed by matchId: the server resolves the room from the match and checks
+    // that this player is in it. The old call passed the room name it wanted to
+    // broadcast into, which any socket could have named.
+    if (socket && activeMatch.matchId) {
+        socket.emit('send_match_emote', { matchId: activeMatch.matchId, emoteId });
     }
 }
 

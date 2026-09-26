@@ -1,0 +1,9 @@
+Object_17 (Shirt) UV layers: ['UVMap', 'UVMap.001']
+Object_17 materials: ['outfit_top']
+  Node image: Image_14, size: 1024x1024
+  Node image: Image_13, size: 1024x1024
+
+Object_15 (Pants) UV layers: ['UVMap', 'UVMap.001']
+Object_15 materials: ['outfit_bottom']
+  Node image: Image_10, size: 1024x1024
+  Node image: Image_11, size: 1024x1024

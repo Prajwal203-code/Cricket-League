@@ -13,9 +13,11 @@
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <!-- Official Facebook JavaScript SDK -->
     <script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>
-    <!-- Three.js WebGL 3D Engine + GLTF Loader + Room Environment (IBL) -->
+    <!-- Three.js WebGL 3D Engine + GLTF Loader + FBX Loader + Room Environment (IBL) -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/libs/fflate.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/environments/RoomEnvironment.js"></script>
 </head>
 
@@ -187,8 +189,21 @@
                             <div class="p-rank">...</div>
                         </div>
                     </div>
-                    <div class="search-pulse-radar"></div>
-                    <p class="search-status-text" id="searchStatusMsg">Connecting with worldwide player...</p>
+                    <div class="search-pulse-radar" id="searchPulseRadar"></div>
+                    <p class="search-status-text" id="searchStatusMsg">Searching for a real opponent...</p>
+
+                    <!-- Bot Option Prompt (shown when no players online) -->
+                    <div class="bot-prompt-container hidden" id="botPromptContainer">
+                        <div class="bot-prompt-card">
+                            <div class="bot-prompt-badge">⚡ NO PLAYERS ONLINE</div>
+                            <p class="bot-prompt-question">No real opponents found right now.<br>Play against AI Bot instead?</p>
+                            <div class="bot-prompt-actions">
+                                <button class="bot-accept-btn" id="playWithBotBtn">🤖 Play with Bot</button>
+                                <button class="bot-keep-waiting-btn" id="keepSearchingBtn">⏳ Keep Searching</button>
+                            </div>
+                        </div>
+                    </div>
+
                     <button class="cancel-search-btn" id="cancelMatchSearchBtn">Cancel Match</button>
                 </div>
             </section>
@@ -251,8 +266,9 @@
                     <button class="menu-hamb-btn">☰</button>
 
                     <div class="match-player-side p1-hud-side">
-                        <div class="hud-avatar">🇮🇳</div>
+                        <div class="hud-avatar" id="hudMatchPlayerAvatar">🏏</div>
                         <span class="hud-player-name" id="hudMatchPlayerName">Player</span>
+                        <span class="hud-player-score" id="hudMatchPlayerScore">0/0</span>
                     </div>
 
                     <div class="match-center-capsule">
@@ -263,6 +279,10 @@
                         <div class="capsule-scores">
                             <span class="total-runs-val" id="matchP1Score">0</span>
                             <span class="target-val" id="matchTargetVal">-</span>
+                        </div>
+                        <div class="capsule-innings-row">
+                            <span id="matchInningsLabel">INNINGS 1</span>
+                            <span id="matchRoleLabel">BATTING</span>
                         </div>
                         <div class="balls-tracker-row">
                             <div class="ball-slot-circle" id="bdot-0"></div>
@@ -275,13 +295,15 @@
                     </div>
 
                     <div class="match-player-side p2-hud-side">
-                        <div class="hud-avatar opponent-avatar-timer">🇵🇰</div>
-                        <span class="hud-player-name">Guest_434660435</span>
+                        <div class="hud-avatar opponent-avatar-timer" id="hudMatchOpponentAvatar">🏏</div>
+                        <span class="hud-player-name" id="hudMatchOpponentName">Opponent</span>
+                        <span class="hud-player-score" id="hudMatchOpponentScore">0/0</span>
                     </div>
                 </div>
 
                 <!-- Live Gameplay Pitch Arena -->
-                <div class="inmatch-stadium-viewport">
+                <div class="inmatch-stadium-viewport" id="inmatchStadiumViewport">
+                    <canvas id="match3dCanvas" class="match-3d-canvas"></canvas>
                     <!-- Top Left Radar -->
                     <div class="field-radar-widget">
                         <div class="radar-pitch-line"></div>
@@ -358,12 +380,42 @@
 
                 <!-- Interactive Swipe / Shot Control Buttons (Bottom) -->
                 <div class="inmatch-control-deck" id="inmatchControlDeck">
-                    <div class="shots-horizontal-selector">
-                        <button class="shot-action-btn" data-shot="Loft">▲ LOFT</button>
-                        <button class="shot-action-btn" data-shot="Cover">COVER ►</button>
-                        <button class="shot-action-btn" data-shot="Straight">▼ STRAIGHT</button>
-                        <button class="shot-action-btn" data-shot="Leg">◄ LEG</button>
-                        <button class="shot-action-btn" data-shot="Defensive">● DEFEND</button>
+                    <!-- Batting: shown while this player is on strike -->
+                    <div class="batting-controls-overlay" id="battingControlsOverlay">
+                        <div class="shots-horizontal-selector">
+                            <button class="shot-action-btn" data-shot="loft">▲ LOFT</button>
+                            <button class="shot-action-btn" data-shot="drive">► DRIVE</button>
+                            <button class="shot-action-btn" data-shot="defensive">● DEFEND</button>
+                        </div>
+                        <p class="control-hint-text" id="battingHintText">Wait for the delivery, then time your shot.</p>
+                    </div>
+
+                    <!-- Bowling: shown while the opponent is on strike -->
+                    <div class="bowling-controls-overlay hidden" id="bowlingControlsOverlay">
+                        <div class="bowl-setting-row">
+                            <label class="bowl-setting-label" for="bowlSpeedSlider">
+                                PACE <strong id="bowlSpeedValue">130</strong> km/h
+                            </label>
+                            <input type="range" class="bowl-speed-slider" id="bowlSpeedSlider"
+                                   min="100" max="155" step="1" value="130">
+                        </div>
+                        <div class="bowl-setting-row">
+                            <span class="bowl-setting-label">LINE</span>
+                            <div class="bowl-option-group" id="bowlLineGroup">
+                                <button class="bowl-option-btn" data-line="off">OFF</button>
+                                <button class="bowl-option-btn active" data-line="middle">MIDDLE</button>
+                                <button class="bowl-option-btn" data-line="leg">LEG</button>
+                            </div>
+                        </div>
+                        <div class="bowl-setting-row">
+                            <span class="bowl-setting-label">LENGTH</span>
+                            <div class="bowl-option-group" id="bowlLengthGroup">
+                                <button class="bowl-option-btn" data-length="full">FULL</button>
+                                <button class="bowl-option-btn active" data-length="good">GOOD</button>
+                                <button class="bowl-option-btn" data-length="short">SHORT</button>
+                            </div>
+                        </div>
+                        <button class="lock-delivery-btn" id="lockDeliveryBtn">🎯 BOWL IT</button>
                     </div>
                 </div>
 
@@ -1188,9 +1240,13 @@
                     <!-- Search / Add Friend Bar (Toggleable) -->
                     <div class="friend-search-bar-row hidden" id="friendSearchBarRow">
                         <input type="text" id="friendSearchInput" class="friend-search-input"
-                            placeholder="Search by name or Player ID...">
+                            placeholder="Search players by name...">
                         <button class="friend-search-action-btn" id="sendFriendRequestBtn">Add Friend ➕</button>
                     </div>
+                    <!-- Live results: real accounts only. Typing a name used to
+                         create an account with that name; now you pick a player
+                         who actually exists. -->
+                    <div class="friend-search-results hidden" id="friendSearchResults"></div>
 
                     <div class="friends-scroll-content" id="friendsScrollContent">
                         <!-- Invite Friends Top Card -->
@@ -2171,12 +2227,16 @@
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
+    <!-- Session must load first: it installs the authenticated fetch wrapper
+         and obtains the token the socket handshake needs. -->
+    <script src="session.js?v=1.0"></script>
     <script src="playerAvatars.js?v=5.1"></script>
     <script src="ballParticles.js?v=5.1"></script>
     <script src="ballSkinsEngine.js?v=5.1"></script>
-    <script src="hero3dBatsman.js?v=19.0"></script>
-    <script src="characterStudio.js?v=19.0"></script>
-    <script src="app.js?v=20.0"></script>
+    <script src="hero3dBatsman.js?v=21.0"></script>
+    <script src="characterStudio.js?v=21.0"></script>
+    <script src="match3dEngine.js?v=21.0"></script>
+    <script src="app.js?v=21.0"></script>
 </body>
 
 </html>

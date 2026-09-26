@@ -1,0 +1,13 @@
+{
+  "addons": [
+    "io_anim_bvh",
+    "io_curve_svg",
+    "io_mesh_uv_layout",
+    "io_scene_fbx",
+    "io_scene_gltf2",
+    "cycles",
+    "pose_library",
+    "bl_pkg"
+  ],
+  "version": "5.2.1 LTS"
+}

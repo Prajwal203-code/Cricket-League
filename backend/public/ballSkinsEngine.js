@@ -428,6 +428,10 @@ async function executeConfirmedPurchase() {
     const skin = KID_BALL_SKINS.find(s => s.id === skinId);
     if (!skin) return;
 
+    // The server owns prices, balances and inventory. A failed purchase is
+    // reported as a failure — the previous version fell back to granting the
+    // ball in localStorage, so a declined or offline purchase still "worked"
+    // locally and then vanished on the next sync.
     try {
         const res = await fetch('/api/balls/buy', {
             method: 'POST',
@@ -435,83 +439,44 @@ async function executeConfirmedPurchase() {
             body: JSON.stringify({ skinId })
         });
 
-        if (res.ok) {
-            const data = await res.json();
-            if (data.success) {
-                if (data.inventory) {
-                    ballInventory = data.inventory;
-                } else {
-                    ballInventory[skinId] = (ballInventory[skinId] || 0) + 1;
-                }
+        const data = await res.json().catch(() => null);
 
-                unlockedBallSkins = Object.keys(ballInventory).filter(id => id === 'classic' || (ballInventory[id] && ballInventory[id] > 0));
+        if (res.ok && data && data.success) {
+            ballInventory = data.inventory || ballInventory;
+            unlockedBallSkins = data.unlockedSkins
+                || Object.keys(ballInventory).filter(id => id === 'classic' || ballInventory[id] > 0);
 
-                if (typeof gameState !== 'undefined') {
-                    gameState.coins = data.coins;
-                    if (typeof updateHud === 'function') updateHud();
-                }
-
-                localStorage.setItem('unlockedBallSkins', JSON.stringify(unlockedBallSkins));
-                localStorage.setItem('ballInventory', JSON.stringify(ballInventory));
-
-                renderBallSkinsGrid();
-                renderShopBallSkinsGrid();
-
-                if (typeof showToast === 'function') {
-                    showToast(`🎉 1 ${skin.name} Added to Inventory! (Total: x${ballInventory[skinId]}) ⚽`);
-                }
-                return;
+            if (typeof gameState !== 'undefined') {
+                gameState.coins = data.coins;
+                if (typeof updateHud === 'function') updateHud();
             }
+
+            localStorage.setItem('unlockedBallSkins', JSON.stringify(unlockedBallSkins));
+            localStorage.setItem('ballInventory', JSON.stringify(ballInventory));
+
+            renderBallSkinsGrid();
+            renderShopBallSkinsGrid();
+
+            if (typeof showToast === 'function') {
+                showToast(`🎉 1 ${skin.name} Added to Inventory! (Total: x${ballInventory[skinId]}) ⚽`);
+            }
+            return;
+        }
+
+        if (typeof showToast === 'function') {
+            showToast(data?.message || 'Purchase failed. Please try again.');
         }
     } catch (e) {
-        console.warn('Phone Storage fallback purchase:', e.message);
-    }
-
-    // Offline / Phone LocalStorage Fallback
-    if (typeof gameState !== 'undefined') {
-        gameState.coins -= skin.price;
-        if (typeof updateHud === 'function') updateHud();
-    }
-    ballInventory[skinId] = (ballInventory[skinId] || 0) + 1;
-    unlockedBallSkins = Object.keys(ballInventory).filter(id => id === 'classic' || (ballInventory[id] && ballInventory[id] > 0));
-    
-    localStorage.setItem('unlockedBallSkins', JSON.stringify(unlockedBallSkins));
-    localStorage.setItem('ballInventory', JSON.stringify(ballInventory));
-    
-    renderBallSkinsGrid();
-    renderShopBallSkinsGrid();
-    
-    if (typeof showToast === 'function') {
-        showToast(`🎉 1 ${skin.name} Saved to Phone Storage! (Total: x${ballInventory[skinId]}) ⚽`);
+        console.warn('Ball purchase failed:', e.message);
+        if (typeof showToast === 'function') {
+            showToast('⚠️ You appear to be offline. Purchases need a connection.');
+        }
     }
 }
 
-// Backup phone localStorage ball inventory to MySQL Database on Login
-async function syncPhoneBallSkinsToSql() {
-    try {
-        const localInv = JSON.parse(localStorage.getItem('ballInventory')) || {};
-        const res = await fetch('/api/balls/sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                inventory: localInv,
-                equippedBall: equippedBallId
-            })
-        });
-        if (res.ok) {
-            const data = await res.json();
-            if (data.success) {
-                if (data.inventory) {
-                    ballInventory = { ...data.inventory };
-                    localStorage.setItem('ballInventory', JSON.stringify(ballInventory));
-                }
-                console.log('✅ Phone ball inventory backed up to MySQL DB successfully!');
-            }
-        }
-    } catch (e) {
-        console.warn('Sync phone balls to SQL failed:', e.message);
-    }
-}
+// Ball inventory lives in the database, keyed to the signed-in account. There
+// is deliberately no "back up my local inventory" call: the server used to
+// accept whatever quantities the browser claimed and grant them for free.
 
 if (typeof window !== 'undefined') {
     window.promptBuyBallSkin = promptBuyBallSkin;
@@ -519,6 +484,5 @@ if (typeof window !== 'undefined') {
     window.renderShopBallSkinsGrid = renderShopBallSkinsGrid;
     window.initBallSkinsEngine = initBallSkinsEngine;
     window.fetchBallCollectionFromDb = fetchBallCollectionFromDb;
-    window.syncPhoneBallSkinsToSql = syncPhoneBallSkinsToSql;
     window.goToShopBallsSection = goToShopBallsSection;
 }

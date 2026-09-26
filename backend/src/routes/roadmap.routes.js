@@ -1,38 +1,32 @@
 const express = require('express');
 const router = express.Router();
+const { requireAuth } = require('../middleware/auth');
 const { getRoadmapStatusForUser, claimLevelReward } = require('../services/roadmapService');
 
-// GET /api/roadmap/status
-router.get('/status', async (req, res) => {
+router.use(requireAuth);
+
+/** GET /api/roadmap/status */
+router.get('/status', async (req, res, next) => {
     try {
-        const userId = parseInt(req.query.userId || 1, 10);
-        const data = await getRoadmapStatusForUser(userId);
-        res.json({
-            success: true,
-            ...data
-        });
+        const data = await getRoadmapStatusForUser(req.userId);
+        res.json({ success: true, ...data });
     } catch (err) {
-        console.error('Error fetching roadmap status:', err.message);
-        res.status(500).json({ success: false, message: err.message });
+        next(err);
     }
 });
 
-// POST /api/roadmap/claim
-router.post('/claim', async (req, res) => {
+/** POST /api/roadmap/claim — claims the reward for a level the caller has reached. */
+router.post('/claim', async (req, res, next) => {
     try {
-        const { userId, level } = req.body;
-        const activeUserId = parseInt(userId || 1, 10);
-        const targetLevel = parseInt(level, 10);
-
-        if (!targetLevel) {
-            return res.status(400).json({ success: false, message: 'Level is required' });
+        const targetLevel = parseInt(req.body.level, 10);
+        if (!Number.isInteger(targetLevel) || targetLevel < 1) {
+            return res.status(400).json({ success: false, code: 'INVALID_LEVEL', message: 'A valid level is required.' });
         }
 
-        const result = await claimLevelReward(activeUserId, targetLevel);
+        const result = await claimLevelReward(req.userId, targetLevel);
         res.json(result);
     } catch (err) {
-        console.error('Error in roadmap claim:', err.message);
-        res.status(500).json({ success: false, message: err.message });
+        next(err);
     }
 });
 

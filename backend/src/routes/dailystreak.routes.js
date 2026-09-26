@@ -1,16 +1,24 @@
+/**
+ * Seven-day login streak.
+ *
+ * Changes from the previous version:
+ *  - identity comes from the session, not `req.query.userId || 1`
+ *  - `/status` no longer writes: it resolved *and persisted* the next streak day
+ *    on a GET, so a page refresh could advance state the player never claimed.
+ *    Streak progression is now computed from `last_login_date` and only written
+ *    by `/claim`.
+ *  - `/claim` locks the streak row, closing the window where two concurrent
+ *    requests both passed the "already claimed today" check and paid out twice
+ *  - the reward table moved to config/gameRules
+ */
 const express = require('express');
 const router = express.Router();
 const { getPool } = require('../config/db');
+const { requireAuth } = require('../middleware/auth');
+const { applyWalletDelta } = require('../services/userService');
+const { STREAK } = require('../config/gameRules');
 
-const STREAK_DAYS = [
-    { day: 1, baseCoins: 500, baseGems: 0, pack: null, icon: '🪙', label: '500 Coins', pill: '+500 🪙' },
-    { day: 2, baseCoins: 0, baseGems: 5, pack: null, icon: '💎', label: '5 Diamonds', pill: '+5 💎' },
-    { day: 3, baseCoins: 1000, baseGems: 0, pack: 'Basic Pack', icon: '🎁', label: '1,000 Coins', pill: '+1,000 🪙' },
-    { day: 4, baseCoins: 0, baseGems: 10, pack: null, icon: '💎', label: '10 Diamonds', pill: '+10 💎' },
-    { day: 5, baseCoins: 2000, baseGems: 10, pack: null, icon: '⚡', label: '2,000 Coins + 10 💎', pill: '+2k 🪙 • +10 💎' },
-    { day: 6, baseCoins: 0, baseGems: 15, pack: 'Elite Pack', icon: '👑', label: '15 Diamonds + Pack', pill: '+15 💎 • Pack' },
-    { day: 7, baseCoins: 5000, baseGems: 25, pack: 'Mega God Vault', icon: '🏆', label: '5,000 🪙 + 25 💎 + 3D Skin', pill: '5k 🪙 • 25 💎 • 3D Ball', isMega: true }
-];
+router.use(requireAuth);
 
 function getLocalDateString(d = new Date()) {
     const year = d.getFullYear();
@@ -26,202 +34,221 @@ function parseDateToStr(val) {
     }
     const d = new Date(val);
     if (isNaN(d.getTime())) return null;
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    return getLocalDateString(d);
 }
 
+/** Whole days between two YYYY-MM-DD strings, calendar-wise. */
 function computeDayDifference(dateStr1, dateStr2) {
     if (!dateStr1 || !dateStr2) return 0;
     const [y1, m1, d1] = dateStr1.split('-').map(Number);
     const [y2, m2, d2] = dateStr2.split('-').map(Number);
-    const date1 = new Date(y1, m1 - 1, d1);
-    const date2 = new Date(y2, m2 - 1, d2);
-    return Math.round((date1 - date2) / (1000 * 60 * 60 * 24));
+    return Math.round((new Date(y1, m1 - 1, d1) - new Date(y2, m2 - 1, d2)) / 86400000);
 }
 
-// GET /api/dailystreak/status
-router.get('/status', async (req, res) => {
+function safeParseDays(raw) {
     try {
-        const userId = parseInt(req.query.userId || 1, 10);
+        const parsed = JSON.parse(raw || '[]');
+        return Array.isArray(parsed) ? parsed.filter(Number.isInteger) : [];
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Resolves what the streak looks like today, without writing anything.
+ *
+ * Pure so `/status` and `/claim` cannot disagree about which day is claimable:
+ * `/claim` persists exactly what this returns.
+ */
+function resolveStreak(row, todayStr) {
+    const stored = {
+        currentDay: row ? (row.current_day || 1) : 1,
+        claimedDays: row ? safeParseDays(row.claimed_days) : [],
+        lastLoginDateStr: row ? parseDateToStr(row.last_login_date) : null
+    };
+
+    // Never claimed: day 1 is open.
+    if (!stored.lastLoginDateStr) {
+        return { currentDay: 1, claimedDays: [], canClaimToday: true, streakBroken: false };
+    }
+
+    const dayDiff = computeDayDifference(todayStr, stored.lastLoginDateStr);
+
+    if (dayDiff === 0) {
+        // Already claimed today; next reward unlocks at midnight.
+        return { ...stored, canClaimToday: false, streakBroken: false };
+    }
+
+    if (dayDiff === 1) {
+        // Claimed yesterday: the streak advances, wrapping after the last day.
+        let currentDay = stored.currentDay;
+        let claimedDays = stored.claimedDays;
+        if (claimedDays.includes(currentDay)) {
+            currentDay = currentDay >= STREAK.cycleDays ? 1 : currentDay + 1;
+            if (currentDay === 1) claimedDays = [];
+        }
+        return { currentDay, claimedDays, canClaimToday: true, streakBroken: false };
+    }
+
+    // A day or more was missed: back to the start.
+    return { currentDay: 1, claimedDays: [], canClaimToday: true, streakBroken: true };
+}
+
+/** Gem rewards scale with level; coins do not. */
+function gemBonusForLevel(level) {
+    return Math.floor((Math.max(1, level) - 1) / STREAK.gemBonusPerLevels);
+}
+
+function rewardForDay(dayDef, level) {
+    const bonus = gemBonusForLevel(level);
+    return {
+        coins: dayDef.baseCoins || 0,
+        gems: dayDef.baseGems > 0 ? dayDef.baseGems + bonus : 0
+    };
+}
+
+function msUntilMidnight() {
+    const nextMidnight = new Date();
+    nextMidnight.setHours(24, 0, 0, 0);
+    return { at: nextMidnight.getTime(), ms: Math.max(0, nextMidnight.getTime() - Date.now()) };
+}
+
+/** GET /api/dailystreak/status — the calendar as it stands right now. */
+router.get('/status', async (req, res, next) => {
+    try {
         const pool = getPool();
         const todayStr = getLocalDateString();
 
-        let streak = {
-            current_day: 1,
-            last_login_date: null,
-            claimed_days: '[]'
-        };
-        let userLevel = 1;
-
-        if (pool && userId) {
-            const [userRows] = await pool.query('SELECT level FROM users WHERE id = ?', [userId]);
-            if (userRows.length > 0) userLevel = userRows[0].level || 1;
-
-            const [rows] = await pool.query('SELECT * FROM user_daily_streaks WHERE user_id = ?', [userId]);
-            if (rows.length > 0) {
-                streak = rows[0];
-            } else {
-                await pool.query('INSERT INTO user_daily_streaks (user_id, current_day, last_login_date, claimed_days) VALUES (?, 1, NULL, "[]")', [userId]);
-            }
+        const [userRows] = await pool.query('SELECT level FROM users WHERE id = ?', [req.userId]);
+        if (userRows.length === 0) {
+            return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Account not found.' });
         }
+        const userLevel = userRows[0].level || 1;
 
-        let claimedDays = JSON.parse(streak.claimed_days || '[]');
-        let currentDay = streak.current_day || 1;
-        const lastLoginDateStr = parseDateToStr(streak.last_login_date);
+        const [rows] = await pool.query(
+            'SELECT * FROM user_daily_streaks WHERE user_id = ?',
+            [req.userId]
+        );
 
-        let canClaimToday = false;
-        let streakBroken = false;
+        const state = resolveStreak(rows[0] || null, todayStr);
 
-        if (!lastLoginDateStr) {
-            // First time ever: can claim Day 1
-            currentDay = 1;
-            claimedDays = [];
-            canClaimToday = true;
-        } else {
-            const dayDiff = computeDayDifference(todayStr, lastLoginDateStr);
-
-            if (dayDiff === 0) {
-                // Claimed today: cannot claim again until tomorrow 12:00 AM
-                canClaimToday = false;
-            } else if (dayDiff === 1) {
-                // Claimed yesterday: advance streak to next day!
-                if (claimedDays.includes(currentDay)) {
-                    currentDay = (currentDay >= 7) ? 1 : currentDay + 1;
-                    if (currentDay === 1) claimedDays = [];
-                    // Update in DB
-                    if (pool && userId) {
-                        await pool.query('UPDATE user_daily_streaks SET current_day = ?, claimed_days = ? WHERE user_id = ?', 
-                            [currentDay, JSON.stringify(claimedDays), userId]);
-                    }
-                }
-                canClaimToday = true;
-            } else if (dayDiff >= 2) {
-                // Missed one or more days: STREAK BROKEN! Reset to Day 1
-                streakBroken = true;
-                currentDay = 1;
-                claimedDays = [];
-                canClaimToday = true;
-                // Update in DB
-                if (pool && userId) {
-                    await pool.query('UPDATE user_daily_streaks SET current_day = 1, last_login_date = NULL, claimed_days = "[]" WHERE user_id = ?', [userId]);
-                }
-            }
-        }
-
-        // Level bonus multiplier (+1 gem per 3 levels)
-        const levelGemBonus = Math.floor((userLevel - 1) / 3);
-
-        const calendar = STREAK_DAYS.map(d => {
-            const isClaimed = claimedDays.includes(d.day);
-            const isToday = (d.day === currentDay);
-            const canClaim = isToday && canClaimToday;
-            const isLocked = d.day > currentDay;
-
-            const finalGems = d.baseGems > 0 ? (d.baseGems + levelGemBonus) : 0;
-            const finalCoins = d.baseCoins > 0 ? d.baseCoins : 0;
-
+        const calendar = STREAK.days.map(d => {
+            const reward = rewardForDay(d, userLevel);
+            const isToday = d.day === state.currentDay;
             return {
                 day: d.day,
                 icon: d.icon,
                 label: d.label,
-                pill: d.baseGems > 0 ? `+${finalGems} 💎` : d.pill,
-                coins: finalCoins,
-                gems: finalGems,
+                pill: d.baseGems > 0 ? `+${reward.gems} 💎` : d.pill,
+                coins: reward.coins,
+                gems: reward.gems,
                 pack: d.pack,
                 isMega: !!d.isMega,
-                isClaimed,
+                isClaimed: state.claimedDays.includes(d.day),
                 isToday,
-                canClaim,
-                isLocked
+                canClaim: isToday && state.canClaimToday,
+                isLocked: d.day > state.currentDay
             };
         });
 
-        const now = new Date();
-        const nextMidnight = new Date();
-        nextMidnight.setHours(24, 0, 0, 0);
-        const msUntilMidnight = Math.max(0, nextMidnight.getTime() - now.getTime());
-        const secondsUntilMidnight = Math.floor(msUntilMidnight / 1000);
+        const midnight = msUntilMidnight();
 
         res.json({
             success: true,
             userLevel,
-            currentDay,
-            canClaimToday,
-            streakBroken,
-            nextResetTimestamp: nextMidnight.getTime(),
-            secondsUntilMidnight,
+            currentDay: state.currentDay,
+            canClaimToday: state.canClaimToday,
+            streakBroken: state.streakBroken,
+            nextResetTimestamp: midnight.at,
+            secondsUntilMidnight: Math.floor(midnight.ms / 1000),
             calendar
         });
     } catch (err) {
-        console.error('Error fetching daily streak:', err.message);
-        res.status(500).json({ success: false, message: err.message });
+        next(err);
     }
 });
 
-// POST /api/dailystreak/claim
-router.post('/claim', async (req, res) => {
+/** POST /api/dailystreak/claim — collects today's reward, once. */
+router.post('/claim', async (req, res, next) => {
+    const pool = getPool();
+    const conn = await pool.getConnection();
     try {
-        const { userId } = req.body;
-        const activeUserId = parseInt(userId || 1, 10);
-        const pool = getPool();
         const todayStr = getLocalDateString();
+        await conn.beginTransaction();
 
-        const [userRows] = await pool.query('SELECT level, coins, gems FROM users WHERE id = ?', [activeUserId]);
-        if (userRows.length === 0) return res.status(404).json({ success: false, message: 'User not found' });
+        const [userRows] = await conn.query('SELECT level FROM users WHERE id = ?', [req.userId]);
+        if (userRows.length === 0) {
+            await conn.rollback();
+            return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Account not found.' });
+        }
         const userLevel = userRows[0].level || 1;
 
-        const [rows] = await pool.query('SELECT * FROM user_daily_streaks WHERE user_id = ?', [activeUserId]);
-        if (rows.length === 0) return res.status(404).json({ success: false, message: 'Streak record not found' });
+        // Ensure a row exists so the lock below has something to hold. The
+        // no-op update makes this safe to run concurrently.
+        await conn.query(`
+            INSERT INTO user_daily_streaks (user_id, current_day, last_login_date, claimed_days)
+            VALUES (?, 1, NULL, '[]')
+            ON DUPLICATE KEY UPDATE user_id = user_id
+        `, [req.userId]);
 
-        const streak = rows[0];
-        const lastLoginDateStr = parseDateToStr(streak.last_login_date);
+        const [rows] = await conn.query(
+            'SELECT * FROM user_daily_streaks WHERE user_id = ? FOR UPDATE',
+            [req.userId]
+        );
 
-        if (lastLoginDateStr === todayStr) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'You have already claimed today\'s daily bonus! Next reward unlocks tonight at 12:00 AM.' 
+        const state = resolveStreak(rows[0], todayStr);
+        if (!state.canClaimToday) {
+            await conn.rollback();
+            const midnight = msUntilMidnight();
+            return res.status(429).json({
+                success: false,
+                code: 'ALREADY_CLAIMED_TODAY',
+                nextResetTimestamp: midnight.at,
+                message: "You have already claimed today's daily bonus! Next reward unlocks tonight at 12:00 AM."
             });
         }
 
-        const dayNum = streak.current_day || 1;
-        const rewardDef = STREAK_DAYS.find(d => d.day === dayNum) || STREAK_DAYS[0];
+        const dayDef = STREAK.days.find(d => d.day === state.currentDay) || STREAK.days[0];
+        const reward = rewardForDay(dayDef, userLevel);
 
-        let claimedDays = JSON.parse(streak.claimed_days || '[]');
-        if (!claimedDays.includes(dayNum)) claimedDays.push(dayNum);
+        const claimedDays = state.claimedDays.includes(state.currentDay)
+            ? state.claimedDays
+            : [...state.claimedDays, state.currentDay];
 
-        // Record claim for TODAY, keeping current_day as dayNum until tomorrow!
-        await pool.query(`
-            UPDATE user_daily_streaks 
-            SET current_day = ?, 
-                last_login_date = ?, 
-                claimed_days = ? 
-            WHERE user_id = ?
-        `, [dayNum, todayStr, JSON.stringify(claimedDays), activeUserId]);
+        await conn.query(`
+            UPDATE user_daily_streaks
+               SET current_day = ?, last_login_date = ?, claimed_days = ?
+             WHERE user_id = ?
+        `, [state.currentDay, todayStr, JSON.stringify(claimedDays), req.userId]);
 
-        // Level-based gem scaling
-        const levelGemBonus = Math.floor((userLevel - 1) / 3);
-        const coinsBonus = rewardDef.baseCoins || 0;
-        const gemsBonus = rewardDef.baseGems > 0 ? (rewardDef.baseGems + levelGemBonus) : 0;
+        const wallet = await applyWalletDelta(req.userId, {
+            coins: reward.coins,
+            gems: reward.gems
+        }, conn);
 
-        if (coinsBonus > 0 || gemsBonus > 0) {
-            await pool.query('UPDATE users SET coins = coins + ?, gems = gems + ? WHERE id = ?', [coinsBonus, gemsBonus, activeUserId]);
-        }
+        await conn.commit();
 
-        const [updatedUser] = await pool.query('SELECT coins, gems FROM users WHERE id = ?', [activeUserId]);
+        const parts = [];
+        if (reward.coins > 0) parts.push(`+${reward.coins.toLocaleString()} 🪙`);
+        if (reward.gems > 0) parts.push(`+${reward.gems} 💎`);
+        const rewardText = parts.join(' ');
 
         res.json({
             success: true,
-            day: dayNum,
-            coins: updatedUser[0].coins,
-            gems: updatedUser[0].gems,
-            rewardText: `${coinsBonus > 0 ? `+${coinsBonus} 🪙 ` : ''}${gemsBonus > 0 ? `+${gemsBonus} 💎` : ''}`,
-            message: `Day ${dayNum} Bonus Collected: ${coinsBonus > 0 ? `+${coinsBonus} Coins ` : ''}${gemsBonus > 0 ? `+${gemsBonus} Diamonds` : ''}!`
+            day: state.currentDay,
+            coins: wallet.user.coins,
+            gems: wallet.user.gems,
+            coinsAwarded: reward.coins,
+            gemsAwarded: reward.gems,
+            pack: dayDef.pack,
+            rewardText,
+            message: `Day ${state.currentDay} Bonus Collected: ${rewardText}!`
         });
     } catch (err) {
-        console.error('Error claiming daily streak bonus:', err.message);
-        res.status(500).json({ success: false, message: err.message });
+        await conn.rollback();
+        next(err);
+    } finally {
+        conn.release();
     }
 });
 

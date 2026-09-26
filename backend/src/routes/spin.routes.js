@@ -1,166 +1,166 @@
+/**
+ * Lucky spin wheel.
+ *
+ * The prize is drawn on the server and the cooldown is enforced against a
+ * locked row, so a client cannot pick its own prize or spin in a loop. The
+ * previous version read the cooldown without a lock, deducted gems and credited
+ * the prize in three separate unsynchronised queries, and trusted `userId` from
+ * the request.
+ */
 const express = require('express');
 const router = express.Router();
 const { getPool } = require('../config/db');
+const { requireAuth } = require('../middleware/auth');
+const { applyWalletDelta } = require('../services/userService');
+const { SPIN, weightedPick } = require('../config/gameRules');
 
-// Cooldown: 3 Days = 72 Hours in Milliseconds
-const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000; // 259,200,000 ms
+router.use(requireAuth);
 
-// 8 Calibrated Prize Wedges
-const SPIN_PRIZES = [
-    { id: 0, label: '1,000 🪙', type: 'coins', amount: 1000, icon: '🪙', color: '#0284c7', weight: 30 },
-    { id: 1, label: '15 💎', type: 'gems', amount: 15, icon: '💎', color: '#10b981', weight: 20 },
-    { id: 2, label: 'Elite Pack 🎁', type: 'pack', name: 'Elite Pack', icon: '🎁', color: '#8b5cf6', weight: 15 },
-    { id: 3, label: '2,500 🪙', type: 'coins', amount: 2500, icon: '🪙', color: '#f59e0b', weight: 15 },
-    { id: 4, label: '50 💎 MEGA', type: 'gems', amount: 50, icon: '💎', color: '#06b6d4', weight: 8 },
-    { id: 5, label: '⚡ Neon Ball', type: 'skin', name: 'Neon Thunderball ⚡', icon: '⚡', color: '#3b82f6', weight: 5 },
-    { id: 6, label: '5,000 🪙', type: 'coins', amount: 5000, icon: '🪙', color: '#eab308', weight: 5 },
-    { id: 7, label: '🏆 100 💎 JACKPOT', type: 'gems', amount: 100, icon: '🏆', color: '#f43f5e', weight: 2 }
-];
+/** Prize faces without their weights — the odds table stays server-side. */
+const PUBLIC_PRIZES = SPIN.prizes.map(({ weight, ...face }) => face);
 
-// Helper: Ensure Table exists
-async function ensureSpinTable(pool) {
-    await pool.query(`
-        CREATE TABLE IF NOT EXISTS user_lucky_spins (
-            user_id INT PRIMARY KEY,
-            last_spin_time BIGINT DEFAULT 0,
-            total_spins INT DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
-}
-
-// GET /api/spin/status?userId=X
-router.get('/status', async (req, res) => {
+/** GET /api/spin/status — wheel faces and the caller's cooldown. */
+router.get('/status', async (req, res, next) => {
     try {
-        const userId = parseInt(req.query.userId || 1, 10);
         const pool = getPool();
-        await ensureSpinTable(pool);
+        const [rows] = await pool.query(
+            'SELECT last_spin_time, total_spins FROM user_lucky_spins WHERE user_id = ?',
+            [req.userId]
+        );
 
-        const [rows] = await pool.query('SELECT * FROM user_lucky_spins WHERE user_id = ?', [userId]);
         const now = Date.now();
-        let lastSpinTime = 0;
-        let totalSpins = 0;
-
-        if (rows.length > 0) {
-            lastSpinTime = Number(rows[0].last_spin_time || 0);
-            totalSpins = Number(rows[0].total_spins || 0);
-        } else {
-            await pool.query('INSERT INTO user_lucky_spins (user_id, last_spin_time, total_spins) VALUES (?, 0, 0)', [userId]);
-        }
+        const lastSpinTime = rows.length > 0 ? Number(rows[0].last_spin_time || 0) : 0;
+        const totalSpins = rows.length > 0 ? Number(rows[0].total_spins || 0) : 0;
 
         const elapsed = now - lastSpinTime;
-        const canSpinFree = elapsed >= THREE_DAYS_MS;
-        const remainingMs = canSpinFree ? 0 : (THREE_DAYS_MS - elapsed);
-        const nextSpinTime = canSpinFree ? now : (lastSpinTime + THREE_DAYS_MS);
+        const canSpinFree = elapsed >= SPIN.cooldownMs;
 
         res.json({
             success: true,
             canSpinFree,
-            remainingMs,
-            nextSpinTime,
-            cooldownHours: 72,
+            remainingMs: canSpinFree ? 0 : SPIN.cooldownMs - elapsed,
+            nextSpinTime: canSpinFree ? now : lastSpinTime + SPIN.cooldownMs,
+            cooldownHours: Math.round(SPIN.cooldownMs / 3600000),
+            rerollGems: SPIN.rerollGems,
             totalSpins,
-            prizes: SPIN_PRIZES.map(({ weight, ...p }) => p)
+            prizes: PUBLIC_PRIZES
         });
     } catch (err) {
-        console.error('Error in /api/spin/status:', err.message);
-        res.status(500).json({ success: false, message: err.message });
+        next(err);
     }
 });
 
-// POST /api/spin/roll
-router.post('/roll', async (req, res) => {
+/**
+ * POST /api/spin/roll — spins the wheel.
+ *
+ * Body: { useGems } — when the free spin is on cooldown, `useGems` pays for an
+ * extra one. Everything else is derived server-side.
+ */
+router.post('/roll', async (req, res, next) => {
+    const pool = getPool();
+    const conn = await pool.getConnection();
     try {
-        const { userId, useGems } = req.body;
-        const activeUserId = parseInt(userId || 1, 10);
-        const pool = getPool();
-        await ensureSpinTable(pool);
+        const useGems = req.body.useGems === true;
+        await conn.beginTransaction();
 
-        const [userRows] = await pool.query('SELECT coins, gems FROM users WHERE id = ?', [activeUserId]);
-        if (userRows.length === 0) return res.status(404).json({ success: false, message: 'User not found' });
+        // Locking the cooldown row first serialises concurrent rolls, so the
+        // same free spin cannot be claimed twice.
+        const [rows] = await conn.query(
+            'SELECT last_spin_time FROM user_lucky_spins WHERE user_id = ? FOR UPDATE',
+            [req.userId]
+        );
 
-        const [spinRows] = await pool.query('SELECT * FROM user_lucky_spins WHERE user_id = ?', [activeUserId]);
+        if (rows.length === 0) {
+            await conn.query(
+                'INSERT INTO user_lucky_spins (user_id, last_spin_time, total_spins) VALUES (?, 0, 0)',
+                [req.userId]
+            );
+        }
+
         const now = Date.now();
-        let lastSpinTime = spinRows.length > 0 ? Number(spinRows[0].last_spin_time || 0) : 0;
+        const lastSpinTime = rows.length > 0 ? Number(rows[0].last_spin_time || 0) : 0;
         const elapsed = now - lastSpinTime;
-        const canSpinFree = elapsed >= THREE_DAYS_MS;
+        const isFreeSpin = elapsed >= SPIN.cooldownMs;
 
-        if (!canSpinFree) {
+        if (!isFreeSpin) {
             if (!useGems) {
-                const remainingHours = Math.ceil((THREE_DAYS_MS - elapsed) / (1000 * 60 * 60));
-                return res.status(400).json({
+                await conn.rollback();
+                const remainingMs = SPIN.cooldownMs - elapsed;
+                return res.status(429).json({
                     success: false,
+                    code: 'ON_COOLDOWN',
                     canSpinFree: false,
-                    message: `⏳ Lucky Spin is on cooldown! Next free spin in ${remainingHours} hours (or use 25 💎 Gems).`
+                    remainingMs,
+                    nextSpinTime: lastSpinTime + SPIN.cooldownMs,
+                    message: `⏳ Lucky Spin is on cooldown! Next free spin in ${Math.ceil(remainingMs / 3600000)} hours (or use ${SPIN.rerollGems} 💎 Gems).`
                 });
             }
 
-            // Deduct 25 Gems for paid re-spin
-            if (userRows[0].gems < 25) {
-                return res.status(400).json({ success: false, message: 'You need 25 💎 Gems for an extra spin!' });
+            const paid = await applyWalletDelta(req.userId, { gems: -SPIN.rerollGems }, conn);
+            if (!paid) {
+                await conn.rollback();
+                return res.status(400).json({
+                    success: false,
+                    code: 'INSUFFICIENT_GEMS',
+                    message: `You need ${SPIN.rerollGems} 💎 Gems for an extra spin!`
+                });
             }
-            await pool.query('UPDATE users SET gems = gems - 25 WHERE id = ?', [activeUserId]);
         }
 
-        // Weighted Random Selection for Fair RNG
-        const totalWeight = SPIN_PRIZES.reduce((sum, p) => sum + p.weight, 0);
-        let rand = Math.random() * totalWeight;
-        let chosenIndex = 0;
+        const { entry: prize, index: winningIndex } = weightedPick(SPIN.prizes);
 
-        for (let i = 0; i < SPIN_PRIZES.length; i++) {
-            if (rand < SPIN_PRIZES[i].weight) {
-                chosenIndex = i;
-                break;
-            }
-            rand -= SPIN_PRIZES[i].weight;
+        const wallet = await applyWalletDelta(req.userId, {
+            coins: prize.type === 'coins' ? prize.amount : 0,
+            gems: prize.type === 'gems' ? prize.amount : 0
+        }, conn);
+
+        if (!wallet) {
+            await conn.rollback();
+            return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Account not found.' });
         }
 
-        const prize = SPIN_PRIZES[chosenIndex];
-
-        // Award prize to user
-        let coinsToAdd = 0;
-        let gemsToAdd = 0;
-
-        if (prize.type === 'coins') coinsToAdd = prize.amount;
-        if (prize.type === 'gems') gemsToAdd = prize.amount;
-
-        if (coinsToAdd > 0 || gemsToAdd > 0) {
-            await pool.query('UPDATE users SET coins = coins + ?, gems = gems + ? WHERE id = ?', [coinsToAdd, gemsToAdd, activeUserId]);
-        }
-
-        // If it was a free spin, update last_spin_time to start 3-day cooldown
-        if (canSpinFree) {
-            await pool.query(`
+        // Only a free spin restarts the cooldown; a paid re-spin just counts.
+        if (isFreeSpin) {
+            await conn.query(`
                 INSERT INTO user_lucky_spins (user_id, last_spin_time, total_spins)
                 VALUES (?, ?, 1)
-                ON DUPLICATE KEY UPDATE last_spin_time = ?, total_spins = total_spins + 1
-            `, [activeUserId, now, now]);
+                ON DUPLICATE KEY UPDATE last_spin_time = VALUES(last_spin_time),
+                                        total_spins = total_spins + 1
+            `, [req.userId, now]);
         } else {
-            await pool.query('UPDATE user_lucky_spins SET total_spins = total_spins + 1 WHERE user_id = ?', [activeUserId]);
+            await conn.query(
+                'UPDATE user_lucky_spins SET total_spins = total_spins + 1 WHERE user_id = ?',
+                [req.userId]
+            );
         }
 
-        // Get updated user balance
-        const [updatedUser] = await pool.query('SELECT coins, gems FROM users WHERE id = ?', [activeUserId]);
+        await conn.commit();
+
+        const nextSpinTime = isFreeSpin ? now + SPIN.cooldownMs : lastSpinTime + SPIN.cooldownMs;
 
         res.json({
             success: true,
-            winningIndex: chosenIndex,
+            winningIndex,
             prize: {
                 id: prize.id,
                 label: prize.label,
                 type: prize.type,
                 amount: prize.amount || 0,
+                name: prize.name || null,
                 icon: prize.icon
             },
-            newCoins: updatedUser[0].coins,
-            newGems: updatedUser[0].gems,
+            newCoins: wallet.user.coins,
+            newGems: wallet.user.gems,
             canSpinFree: false,
-            remainingMs: THREE_DAYS_MS,
+            remainingMs: Math.max(0, nextSpinTime - now),
+            nextSpinTime,
             message: `🎉 You won ${prize.label}!`
         });
     } catch (err) {
-        console.error('Error in /api/spin/roll:', err.message);
-        res.status(500).json({ success: false, message: err.message });
+        await conn.rollback();
+        next(err);
+    } finally {
+        conn.release();
     }
 });
 

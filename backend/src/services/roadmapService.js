@@ -1,4 +1,5 @@
 const { getPool } = require('../config/db');
+const { applyWalletDelta } = require('./userService');
 
 /**
  * Level Roadmap System Engine
@@ -158,56 +159,63 @@ async function getRoadmapStatusForUser(userId) {
 }
 
 /**
- * Claims a specific milestone level reward for a user
+ * Claims a specific milestone level reward for a user.
+ *
+ * The claim row is inserted *before* any currency is credited. The unique key
+ * on (user_id, level) then makes a duplicate claim impossible: the previous
+ * order credited coins first and recorded the claim second, so two requests
+ * arriving together both passed the "already claimed?" check and paid out twice.
  */
 async function claimLevelReward(userId, targetLevel) {
     const pool = getPool();
-    if (!pool || !userId) {
-        return { success: false, message: 'Database connection unavailable' };
-    }
-
     const lvl = parseInt(targetLevel, 10);
     if (!lvl || lvl < 1) {
-        return { success: false, message: 'Invalid level specified' };
+        return { success: false, code: 'INVALID_LEVEL', message: 'Invalid level specified.' };
     }
 
+    const conn = await pool.getConnection();
     try {
-        // 1. Check user current level
-        const [userRows] = await pool.query('SELECT level, coins, gems FROM users WHERE id = ?', [userId]);
+        await conn.beginTransaction();
+
+        const [userRows] = await conn.query('SELECT level FROM users WHERE id = ?', [userId]);
         if (userRows.length === 0) {
-            return { success: false, message: 'User not found' };
+            await conn.rollback();
+            return { success: false, code: 'NOT_FOUND', message: 'Account not found.' };
+        }
+        if (userRows[0].level < lvl) {
+            await conn.rollback();
+            return {
+                success: false,
+                code: 'LEVEL_NOT_REACHED',
+                message: `You need to reach Level ${lvl} to claim this reward!`
+            };
         }
 
-        const user = userRows[0];
-        if (user.level < lvl) {
-            return { success: false, message: `You need to reach Level ${lvl} to claim this reward!` };
-        }
-
-        // 2. Check if already claimed
-        const [existingClaim] = await pool.query('SELECT id FROM user_level_rewards WHERE user_id = ? AND level = ?', [userId, lvl]);
-        if (existingClaim.length > 0) {
-            return { success: false, message: `Level ${lvl} reward has already been claimed.` };
-        }
-
-        // 3. Get reward details
         const reward = getRewardForLevel(lvl);
 
-        // 4. Credit coins and gems to user
-        await pool.query(`
-            UPDATE users 
-            SET coins = coins + ?, 
-                gems = gems + ? 
-            WHERE id = ?
-        `, [reward.coins || 0, reward.gems || 0, userId]);
+        try {
+            await conn.query(`
+                INSERT INTO user_level_rewards (user_id, level, coins_awarded, gems_awarded, pack_awarded)
+                VALUES (?, ?, ?, ?, ?)
+            `, [userId, lvl, reward.coins || 0, reward.gems || 0, reward.pack || '']);
+        } catch (err) {
+            if (err.code === 'ER_DUP_ENTRY') {
+                await conn.rollback();
+                return {
+                    success: false,
+                    code: 'ALREADY_CLAIMED',
+                    message: `Level ${lvl} reward has already been claimed.`
+                };
+            }
+            throw err;
+        }
 
-        // 5. Record claim in user_level_rewards
-        await pool.query(`
-            INSERT INTO user_level_rewards (user_id, level, coins_awarded, gems_awarded, pack_awarded)
-            VALUES (?, ?, ?, ?, ?)
-        `, [userId, lvl, reward.coins || 0, reward.gems || 0, reward.pack || '']);
+        const result = await applyWalletDelta(userId, {
+            coins: reward.coins || 0,
+            gems: reward.gems || 0
+        }, conn);
 
-        // Fetch updated balances
-        const [updatedUser] = await pool.query('SELECT coins, gems, level FROM users WHERE id = ?', [userId]);
+        await conn.commit();
 
         return {
             success: true,
@@ -219,11 +227,13 @@ async function claimLevelReward(userId, targetLevel) {
                 pack: reward.pack,
                 unlock: reward.unlock
             },
-            updatedUser: updatedUser[0]
+            updatedUser: result ? result.user : null
         };
     } catch (err) {
-        console.error('SQL Error claiming level reward:', err.message);
-        return { success: false, message: err.message };
+        await conn.rollback();
+        throw err;
+    } finally {
+        conn.release();
     }
 }
 

@@ -9,11 +9,15 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Environment
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+# Environment — never commit real secrets. .env.example is the tracked template.
+.env
+.env.*
+!.env.example
+
+# Android release signing
+*.keystore
+*.jks
+keystore.properties
 
 # IDE & System
 .DS_Store
@@ -35,3 +39,18 @@ Thumbs.db
 [Ll]ogs/
 [Uu]ser[Ss]ettings/
 [Mm]emoryCaptures/
+
+# Python & Caches
+__pycache__/
+*.py[cod]
+*$py.class
+.gstack/
+.load-test-results/
+
+# Temporary bridge & load test files
+blender_output.txt
+blender_status.json
+blender_success.txt
+blender_test.txt
+jeeni-public-browse-loadtest.js
+
