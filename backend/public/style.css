@@ -11591,3 +11591,52 @@ body {
     font-size: 13px;
     padding: 24px 0;
 }
+/* Progression feedback follows the existing stadium palette. */
+.progression-guidance { border-top: 1px solid rgba(148,163,184,.25); margin-top: 16px; padding-top: 12px; color: #e2e8f0; }
+.progression-guidance p { margin: 8px 0; line-height: 1.5; font-size: 14px; }
+.progression-caption { color: #cbd5e1; font-size: 12px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+#homeProgressHint { margin-top: 8px; max-width: 180px; }
+.progression-primary { background: #fbbf24; color: #172033; border: 0; border-radius: 10px; padding: 12px 18px; font-weight: 700; min-height: 44px; cursor: pointer; }
+.progression-pages { display: flex; justify-content: space-between; gap: 12px; margin-top: 12px; }
+.progression-pages button, .progression-error button { min-height: 44px; padding: 8px 12px; border: 1px solid #64748b; border-radius: 8px; background: #17243b; color: #f1f5f9; cursor: pointer; }
+.progression-level-up { color: #fcd34d; font-weight: 800; letter-spacing: .05em; }
+.progression-error { padding: 24px; color: #e2e8f0; line-height: 1.5; }
+button { touch-action: manipulation; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button:focus-visible, [role=button]:focus-visible, input:focus-visible { outline: 3px solid #67e8f9; outline-offset: 4px; }
+#payoutNotification p { line-height: 1.5; }
+.free-primary-claim-btn { width: 100%; border: 0; font: inherit; color: inherit; text-align: left; }
+.free-claim-amount, .free-claim-sub { display: block; }
+/* Keep every live control in the viewport, including small phones. */
+.match-playing .app-bottom-nav { display: none; }
+.match-playing .app-header { flex-shrink: 0; }
+.match-top-hud { flex-shrink: 0; height: 100px; gap: 6px; background: #102846; border-color: #315d7b; }
+.match-top-hud .menu-hamb-btn { min-width: 44px; height: 44px; }
+.match-player-side { min-width: 0; }
+.match-center-capsule { flex: 1; min-width: 0; }
+.capsule-innings-row { display: flex; flex-direction: column; align-items: center; font-size: 11px; gap: 2px; }
+#matchRoleLabel { color: #7dd3fc; font-weight: 700; }
+.inmatch-stadium-viewport { min-height: 0; }
+.inmatch-control-deck { height: auto; flex: 0 0 auto; padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); background: #0b1b31; }
+.batting-controls-overlay, .bowling-controls-overlay { width: 100%; }
+.bowling-controls-overlay { display: grid; gap: 8px; }
+.bowl-setting-row { display: flex; align-items: center; gap: 12px; }
+.bowl-setting-label { width: 80px; flex-shrink: 0; font-size: 12px; color: #cbd5e1; }
+.bowl-speed-slider { flex: 1; min-width: 0; height: 44px; accent-color: #38bdf8; }
+.bowl-option-group { flex: 1; display: flex; gap: 8px; }
+.bowl-option-btn { flex: 1; min-width: 0; min-height: 44px; border: 1px solid #516981; background: #142c45; color: #e2e8f0; border-radius: 8px; font: 700 12px 'Barlow', sans-serif; cursor: pointer; }
+.bowl-option-btn.active { background: #a5e4fc; border-color: #e0f2fe; color: #082f49; }
+.lock-delivery-btn { min-height: 48px; width: 100%; border: 0; border-radius: 10px; background: #38bdf8; color: #082f49; font: 800 15px 'Barlow', sans-serif; cursor: pointer; }
+.shot-action-btn { min-height: 48px; font-size: 13px; }
+.control-hint-text { margin-top: 8px; color: #cbd5e1; font-size: 12px; text-align: center; line-height: 1.4; }
+.vertical-timing-meter { top: 96px; height: min(280px, calc(100% - 110px)); min-height: 70px; }
+.shot-popup-center { width: 90%; text-align: center; font-size: 32px; line-height: 1.1; }
+.stance-slider-bar { display: none; }
+.match-menu-dialog { margin: auto; width: min(360px, calc(100% - 32px)); padding: 24px; background: #0b1b31; color: #f1f5f9; border: 1px solid #516981; border-radius: 16px; }
+.match-menu-dialog::backdrop { background: rgba(2, 6, 23, .8); }
+.match-menu-dialog p { margin: 12px 0 20px; line-height: 1.5; }
+.match-menu-dialog button { width: 100%; margin-top: 8px; min-height: 44px; border-radius: 8px; border: 1px solid #516981; background: #142c45; color: #fff; font-weight: 700; cursor: pointer; }
+.match-menu-dialog #stayInMatchBtn { background: #38bdf8; color: #082f49; }
+[hidden] { display: none !important; }
+@media (max-width: 480px) { .progression-guidance p { font-size: 13px; } .progression-primary { width: 100%; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }

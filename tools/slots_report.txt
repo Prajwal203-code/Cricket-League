@@ -1,9 +1,0 @@
-
-Object Object_15 (data: outfit_bottom_outfit_bottom_0):
-  Slot 0: outfit_bottom (material: outfit_bottom)
-
-Object Object_16 (data: outfit_shoes_outfit_shoes_0):
-  Slot 0: outfit_shoes (material: outfit_shoes)
-
-Object Object_17 (data: outfit_top_outfit_top_0):
-  Slot 0: outfit_top (material: outfit_top)

@@ -235,6 +235,34 @@ const MIGRATIONS = [
             `);
         }
     }
+    ,{
+        id: 8,
+        name: 'auditable progression and recoverable match payments',
+        async up(conn) {
+            await conn.query('ALTER TABLE users MODIFY coins BIGINT NOT NULL DEFAULT 25870, MODIFY gems BIGINT NOT NULL DEFAULT 60');
+            await addColumn(conn, 'user_level_rewards', 'rules_version', 'VARCHAR(40) NULL');
+            await conn.query(`CREATE TABLE IF NOT EXISTS wallet_ledger (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL,
+                reason VARCHAR(80) NOT NULL, coins_delta BIGINT NOT NULL, gems_delta BIGINT NOT NULL,
+                xp_awarded INT NOT NULL, level_before INT NOT NULL, level_after INT NOT NULL,
+                coins_after BIGINT NOT NULL, gems_after BIGINT NOT NULL, rules_version VARCHAR(40) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_wallet_user_created (user_id, created_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+            await conn.query(`CREATE TABLE IF NOT EXISTS match_entries (
+                id CHAR(36) PRIMARY KEY, user_id INT NOT NULL, tour_id INT NOT NULL,
+                entry_fee INT NOT NULL, prize INT NOT NULL,
+                status ENUM('queued','playing','refunded','settled') NOT NULL DEFAULT 'queued',
+                match_uuid CHAR(36) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_entries_user_status (user_id, status)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+            await conn.query(`CREATE TABLE IF NOT EXISTS match_settlements (
+                match_uuid CHAR(36) PRIMARY KEY, match_data LONGTEXT NOT NULL,
+                payouts LONGTEXT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                settled_at TIMESTAMP NULL DEFAULT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+        }
+    }
 ];
 
 // ---------------------------------------------------------------------------

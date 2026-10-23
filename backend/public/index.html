@@ -89,7 +89,7 @@
                         style="cursor: pointer; margin-top: 6px;">
                         <div class="banner-icon">🎟️</div>
                         <div class="banner-text">STRIKE<br>PASS</div>
-                        <span class="widget-badge-count pass-tier-badge" id="homePassTierTag">T7</span>
+                        <span class="widget-badge-count pass-tier-badge" id="homePassTierTag">—</span>
                     </div>
 
                     <div class="banner-action-widget streak-blue-card" id="homeDailyStreakWidget"
@@ -145,9 +145,8 @@
                 </div>
 
                 <!-- Center 3D Batsman Hero with Country Uniform -->
-                <div class="hero-character-stage" id="heroCharacterStage" title="Tap to swing!">
-                    <img src="images/players/hero_IN.jpg" class="hero-batsman-img" id="heroBatsmanImg"
-                        alt="3D Batsman Hero" />
+                <div class="hero-character-stage" id="heroCharacterStage" title="Drag to rotate. Tap to return to the front.">
+                    <div role="status">Loading 3D player…</div>
                     <div class="hero-character-aura"></div>
                     <div class="practice-toast hidden" id="practiceToast">POWERFUL SHOT! 🏏</div>
                 </div>
@@ -195,10 +194,10 @@
                     <!-- Bot Option Prompt (shown when no players online) -->
                     <div class="bot-prompt-container hidden" id="botPromptContainer">
                         <div class="bot-prompt-card">
-                            <div class="bot-prompt-badge">⚡ NO PLAYERS ONLINE</div>
-                            <p class="bot-prompt-question">No real opponents found right now.<br>Play against AI Bot instead?</p>
+                            <div class="bot-prompt-badge">PRACTICE WHILE YOU WAIT</div>
+                            <p class="bot-prompt-question">Still finding an opponent.<br>Practice is free and does not award coins or XP.</p>
                             <div class="bot-prompt-actions">
-                                <button class="bot-accept-btn" id="playWithBotBtn">🤖 Play with Bot</button>
+                                <button class="bot-accept-btn" id="playWithBotBtn" title="Free practice; no coins or XP are awarded">Practice with Bot</button>
                                 <button class="bot-keep-waiting-btn" id="keepSearchingBtn">⏳ Keep Searching</button>
                             </div>
                         </div>
@@ -263,7 +262,7 @@
             <section class="screen-panel hidden" id="screen-match">
                 <!-- Top In-Match Scoreboard -->
                 <div class="match-top-hud">
-                    <button class="menu-hamb-btn">☰</button>
+                    <button class="menu-hamb-btn" id="matchMenuBtn" aria-label="Match menu">☰</button>
 
                     <div class="match-player-side p1-hud-side">
                         <div class="hud-avatar" id="hudMatchPlayerAvatar">🏏</div>
@@ -420,6 +419,12 @@
                 </div>
 
                 <!-- Screen 7: Celebratory Banner -->
+                <dialog class="match-menu-dialog" id="matchMenuDialog" aria-labelledby="matchMenuTitle">
+                    <h2 id="matchMenuTitle">Leave this match?</h2>
+                    <p id="matchLeaveDescription">The match continues while this menu is open. Leaving forfeits your entry fee and match rewards.</p>
+                    <button id="stayInMatchBtn" autofocus>Keep playing</button>
+                    <button id="leaveLiveMatchBtn">Leave match</button>
+                </dialog>
                 <div class="celebration-overlay hidden" id="celebrationOverlay">
                     <div class="celebration-badge" id="celebBadge">6</div>
                     <div class="celebration-subtitle" id="celebSubtitle">MAXIMUM SIX!</div>
@@ -431,10 +436,10 @@
                 <div class="result-victory-container">
                     <!-- Challenge Milestone Strip -->
                     <div class="result-challenge-strip">
-                        <div class="challenge-strip-title">🎯 Challenge: Earn 500,000 coins</div>
+                        <div class="challenge-strip-title" id="resultProgressTitle">PLAYER PROGRESSION</div>
                         <div class="challenge-progress-track">
-                            <div class="progress-fill" style="width: 54%;"></div>
-                            <span class="progress-label">255,700 / 500,000</span>
+                            <div class="progress-fill" id="resultProgressFill" style="width: 0%;"></div>
+                            <span class="progress-label" id="resultProgressLabel">Syncing progress…</span>
                         </div>
                     </div>
 
@@ -448,7 +453,7 @@
                     <div class="result-scorecards-grid">
                         <!-- P1 Card -->
                         <div class="result-player-card card-winner" id="resultP1Card">
-                            <div class="card-winner-badge">WINNER</div>
+                            <div class="card-winner-badge" hidden>WINNER</div>
                             <div class="res-avatar">🇮🇳</div>
                             <div class="res-name" id="matchResMyName">Player</div>
                             <div class="res-star">⭐ 30</div>
@@ -458,6 +463,7 @@
 
                         <!-- P2 Card -->
                         <div class="result-player-card card-loser" id="resultP2Card">
+                            <div class="card-winner-badge" hidden>WINNER</div>
                             <div class="res-avatar">🇵🇰</div>
                             <div class="res-name">Guest_434660</div>
                             <div class="res-star">⭐ 32</div>
@@ -477,7 +483,7 @@
                     <!-- Action Buttons -->
                     <div class="result-actions-column">
                         <button class="gold-continue-btn" id="resultContinueBtn">CONTINUE</button>
-                        <button class="rematch-btn" id="resultRematchBtn">REMATCH</button>
+                        <button class="rematch-btn" id="resultRematchBtn">PLAY AGAIN</button>
                     </div>
                 </div>
             </section>
@@ -496,7 +502,7 @@
                     <div class="roadmap-hero-top">
                         <div class="roadmap-star-badge" id="roadmapHeroLevel">⭐ 1</div>
                         <div class="roadmap-hero-info">
-                            <div class="roadmap-hero-title">Level Progression Road</div>
+                            <div class="roadmap-hero-title">Your path to the next milestone</div>
                             <div class="roadmap-xp-text" id="roadmapHeroXpText">0 / 50 XP</div>
                         </div>
                     </div>
@@ -1105,25 +1111,24 @@
                 <div class="piggy-bank-section-box">
                     <div class="section-blue-title">PIGGY BANK</div>
                     <div class="piggy-inner-card">
-                        <div class="piggy-card-header">You did it! You filled your piggy bank ℹ️</div>
+                        <div class="piggy-card-header">Piggy bank rewards are coming soon</div>
                         <div class="piggy-card-body">
                             <div class="piggy-golden-character" id="piggyAnim">
                                 <div class="cowboy-hat">🤠</div>
                                 <div class="pig-emoji">🐷</div>
                                 <div class="full-badge-bar">
-                                    <span class="full-text">FULL</span>
-                                    <span class="tier-num">2</span>
+                                    <span class="full-text">PREVIEW</span>
                                 </div>
                             </div>
                             <div class="piggy-rewards-list">
-                                <div class="r-title">Rewards:</div>
+                                <div class="r-title">Planned rewards:</div>
                                 <div class="r-item"><span class="r-icon">💎</span> x385</div>
                                 <div class="r-item"><span class="r-icon">🪙</span> x4,000</div>
                                 <div class="r-item"><span class="r-icon">🃏</span> x2 Cards</div>
                             </div>
                         </div>
-                        <button class="green-price-btn break-piggy-btn" id="breakPiggyBtn">
-                            Open Now<br><span class="gem-cost">350 💎</span>
+                        <button class="green-price-btn break-piggy-btn" id="breakPiggyBtn" disabled>
+                            Coming soon
                         </button>
                     </div>
                 </div>
@@ -1132,7 +1137,7 @@
                 <div class="featured-bundle-card">
                     <div class="bundle-top-banner">
                         <span class="bundle-title">Epic Bowler Pack</span>
-                        <span class="ads-pill">ADS</span>
+                        <span class="ads-pill">PREVIEW</span>
                     </div>
                     <div class="bundle-items-display">
                         <div class="bundle-col">
@@ -1154,9 +1159,7 @@
                         </div>
                     </div>
                     <div class="bundle-action-row">
-                        <div class="value-flag">2X VALUE!</div>
-                        <button class="green-price-btn" id="buyFeaturedPackBtn">₹199.00</button>
-                        <div class="timer-tag">Ends in:<br><strong>1w 1d</strong></div>
+                        <button class="green-price-btn" id="buyFeaturedPackBtn" disabled>Coming soon</button>
                     </div>
                 </div>
             </section>
@@ -1417,13 +1420,13 @@
                     </div>
 
                     <!-- Top Green Instant Claim Banner -->
-                    <div class="free-primary-claim-btn" id="freeInstantClaimBtn">
-                        <div class="free-coin-icon-circle">🪙</div>
-                        <div class="free-claim-text-col">
-                            <div class="free-claim-amount">100</div>
-                            <div class="free-claim-sub">Collect now!</div>
-                        </div>
-                    </div>
+                    <button type="button" class="free-primary-claim-btn" id="freeInstantClaimBtn">
+                        <span class="free-coin-icon-circle">🪙</span>
+                        <span class="free-claim-text-col">
+                            <span class="free-claim-amount">…</span>
+                            <span class="free-claim-sub">Connecting…</span>
+                        </span>
+                    </button>
 
                     <!-- 4 Video / Ad Reward Rows -->
                     <div class="free-rewards-list">
@@ -2233,10 +2236,13 @@
     <script src="playerAvatars.js?v=5.1"></script>
     <script src="ballParticles.js?v=5.1"></script>
     <script src="ballSkinsEngine.js?v=5.1"></script>
-    <script src="hero3dBatsman.js?v=21.0"></script>
+    <script src="cricketPlayerRig.js?v=1.0"></script>
+    <script src="hero3dBatsman.js?v=24.1"></script>
     <script src="characterStudio.js?v=21.0"></script>
     <script src="match3dEngine.js?v=21.0"></script>
-    <script src="app.js?v=21.0"></script>
+    <script src="app.js?v=22.0"></script>
+    <script src="progressionClient.js?v=1.0"></script>
+    <script src="liveMatch.js?v=1.0"></script>
 </body>
 
 </html>

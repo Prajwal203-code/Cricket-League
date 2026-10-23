@@ -116,6 +116,9 @@ async function dispatch(io, match, events) {
     if (events.some(e => e.type === 'match_end')) {
         await concludeMatch(io, match);
     } else {
+        for (const userId of match.order) {
+            socketForUser(io, userId)?.emit('match_state', engine.publicState(match, userId));
+        }
         armBallTimer(io, match);
     }
 }
@@ -176,6 +179,10 @@ async function concludeMatch(io, match) {
         payouts = await matchService.settleMatch(match);
     } catch (err) {
         console.error('[match] settlement failed for', match.matchId, err);
+        io.to(match.roomName).emit('match_settlement_pending', { matchId: match.matchId,
+            message: 'Your result is saved. Rewards are being retried.' });
+        setTimeout(() => concludeMatch(io, match), 5000).unref();
+        return;
     }
 
     for (const userId of match.order) {
@@ -225,6 +232,7 @@ function findOpponent(queue, candidate) {
     const now = Date.now();
     return queue.findIndex(entry => {
         if (entry.userId === candidate.userId) return false;
+        if (entry.entryFee !== candidate.entryFee || entry.prize !== candidate.prize || entry.rules.version !== candidate.rules.version) return false;
         const waited = Math.max(now - entry.joinedAt, now - candidate.joinedAt);
         const range = waited >= MATCHMAKING.levelRangeRelaxAfterMs
             ? MATCHMAKING.relaxedLevelRange
@@ -247,6 +255,15 @@ async function startMatch(io, tourId, entryA, entryB) {
         p2: { ...entryB.profile, power: powerB }
     });
 
+    match.rules = entryA.rules;
+    match.tourTier = entryA.tourTier;
+    match.entryIds = { [entryA.userId]: entryA.entryId, [entryB.userId]: entryB.entryId };
+    try { await matchService.activateEntries(match); }
+    catch (error) {
+        await matchService.refundEntryFee(entryA.userId, tourId, entryA.entryId);
+        await matchService.refundEntryFee(entryB.userId, tourId, entryB.entryId);
+        throw error;
+    }
     activeMatches.set(match.matchId, match);
 
     for (const entry of [entryA, entryB]) {
@@ -314,6 +331,9 @@ function buildEntry(user, socketId, charge) {
         socketId,
         level: user.level,
         joinedAt: Date.now(),
+        entryId: charge.entryId,
+        rules: charge.rules,
+        tourTier: charge.tour.tour_number,
         entryFee: charge.tour.entry_fee,
         prize: charge.tour.prize,
         profile: {
@@ -374,8 +394,8 @@ function registerMatchSockets(io) {
             if (userToMatch.has(userId)) {
                 return fail(socket, 'ALREADY_IN_MATCH', 'You are already in a match.');
             }
-            if (removeFromQueue(userId)) {
-                // Silently replace a stale queue entry rather than double-queueing.
+            if ([...queues.values()].some(queue => queue.some(entry => entry.userId === userId))) {
+                return fail(socket, 'ALREADY_QUEUED', 'You are already searching. Cancel before starting another search.');
             }
 
             const tid = Number(tourId);
@@ -389,22 +409,12 @@ function registerMatchSockets(io) {
                     return fail(socket, charge.code, charge.message);
                 }
 
+                if (!socket.connected) {
+                    await matchService.refundEntryFee(userId, tid, charge.entryId);
+                    return;
+                }
                 const user = await getUserById(userId);
-                const entry = {
-                    userId,
-                    socketId: socket.id,
-                    level: user.level,
-                    joinedAt: Date.now(),
-                    entryFee: charge.tour.entry_fee,
-                    prize: charge.tour.prize,
-                    profile: {
-                        userId,
-                        username: user.username,
-                        avatar: user.avatar,
-                        countryCode: user.country_code,
-                        level: user.level
-                    }
-                };
+                const entry = buildEntry(user, socket.id, charge);
 
                 socket.emit('matchmaking_started', {
                     tourId: tid,
@@ -433,7 +443,7 @@ function registerMatchSockets(io) {
                     if (!removed) return;
                     let balance = null;
                     try {
-                        balance = await matchService.refundEntryFee(userId, tid);
+                        balance = await matchService.refundEntryFee(userId, tid, removed.entry.entryId);
                     } catch (err) {
                         console.error('[match] refund on timeout failed:', err);
                     }
@@ -460,7 +470,7 @@ function registerMatchSockets(io) {
 
             let balance = null;
             try {
-                balance = await matchService.refundEntryFee(userId, removed.tourId);
+                balance = await matchService.refundEntryFee(userId, removed.tourId, removed.entry.entryId);
             } catch (err) {
                 console.error('[match] refund on cancel failed:', err);
             }
@@ -606,7 +616,7 @@ function registerMatchSockets(io) {
                 }
                 const chargeB = await matchService.chargeEntryFee(userId, tourId);
                 if (!chargeB.ok) {
-                    await matchService.refundEntryFee(challenge.fromUserId, tourId);
+                    await matchService.refundEntryFee(challenge.fromUserId, tourId, chargeA.entryId);
                     return fail(socket, chargeB.code, chargeB.message);
                 }
 
@@ -637,6 +647,13 @@ function registerMatchSockets(io) {
             if (challengerSocket) {
                 challengerSocket.emit('1v1_challenge_declined', { challengeId });
             }
+        });
+
+        socket.on('cancel_1v1_challenge', ({ challengeId } = {}) => {
+            const challenge = pendingChallenges.get(challengeId);
+            if (!challenge || challenge.fromUserId !== userId) return;
+            pendingChallenges.delete(challengeId);
+            socketForUser(io, challenge.toUserId)?.emit('1v1_challenge_cancelled', { challengeId });
         });
 
         // --- Custom rooms ----------------------------------------------------
@@ -734,7 +751,7 @@ function registerMatchSockets(io) {
                 const removed = removeFromQueue(id);
                 if (removed) {
                     try {
-                        await matchService.refundEntryFee(id, removed.tourId);
+                        await matchService.refundEntryFee(id, removed.tourId, removed.entry.entryId);
                     } catch (err) {
                         console.error('[room] queue refund failed:', err);
                     }
@@ -752,7 +769,7 @@ function registerMatchSockets(io) {
 
                 const joinCharge = await matchService.chargeEntryFee(userId, tourId);
                 if (!joinCharge.ok) {
-                    await matchService.refundEntryFee(room.hostUserId, tourId);
+                    await matchService.refundEntryFee(room.hostUserId, tourId, hostCharge.entryId);
                     return fail(socket, joinCharge.code, joinCharge.message);
                 }
 
@@ -821,7 +838,7 @@ function registerMatchSockets(io) {
             const removed = removeFromQueue(userId);
             if (removed) {
                 try {
-                    await matchService.refundEntryFee(userId, removed.tourId);
+                    await matchService.refundEntryFee(userId, removed.tourId, removed.entry.entryId);
                 } catch (err) {
                     console.error('[match] refund on disconnect failed:', err);
                 }

@@ -12,7 +12,7 @@ for %%I in ("%PROJECT_DIR%..\..") do set "XAMPP_DIR=%%~fI"
 set "MYSQL_BIN=%XAMPP_DIR%\mysql\bin"
 
 :: Read PORT and DB_PORT from backend\.env, falling back to defaults.
-set "PORT=3000"
+set "PORT=3005"
 set "DB_PORT=3307"
 if exist "%PROJECT_DIR%backend\.env" (
     for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%PROJECT_DIR%backend\.env") do (

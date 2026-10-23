@@ -71,7 +71,8 @@ const config = {
     isProduction,
     isTest: NODE_ENV === 'test',
 
-    port: parseIntOr(process.env.PORT, 3000),
+    port: parseIntOr(process.env.PORT, 3005),
+    trustProxy: process.env.TRUST_PROXY === '1' ? 1 : false,
     corsOrigins,
 
     db: {

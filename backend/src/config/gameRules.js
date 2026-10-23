@@ -1,10 +1,6 @@
 /**
- * Central game balance and rules.
- *
- * Every gameplay/economy number the server treats as authoritative lives here.
- * Previously these were literals scattered across the socket layer, the route
- * handlers, the DB seed and the browser client — which meant the client could
- * disagree with the server about what a match was worth.
+ * Server gameplay and feature rules. Hot-reloaded XP, level rewards and match
+ * payouts live in config/progression.json and are read through liveRules.js.
  */
 
 const MATCH = {
@@ -55,40 +51,16 @@ const ECONOMY = {
     startingTrophies: 120,
     startingLevel: 1,
 
-    /** Paid to the loser so a defeat is not a pure loss of the entry fee. */
-    consolationCoins: 20,
-
-    /** Trophy movement per ranked match. */
-    trophiesPerWin: 8,
-    trophiesPerLoss: -5,
-
-    /** XP awards. Match XP scales with the tour's difficulty tier. */
-    xpPerWinPerTour: 15,
-    xpPerLoss: 5,
-    xpPerSix: 2,
-
-    /** Coins granted on level-up, multiplied by the new level. */
-    levelUpCoinsPerLevel: 100
+    /** Fixed contribution per club win; independent of ranked trophy balance. */
+    trophiesPerWin: 8
 };
 
 /**
- * XP needed to advance *from* the given level. Mirrored in the client for the
- * progress bar; the server value is the one that counts.
+ * Compatibility export. The client reads max_xp from the server profile.
  */
 function xpForLevel(level) {
-    return Math.round(50 * Math.pow(level, 1.35));
+    return require('../services/progression').xpForLevel(level);
 }
-
-/** Free/ad reward claims. Cooldowns are enforced server-side. */
-const REWARDS = {
-    freeCoins: 100,
-    freeXp: 10,
-    /** Minimum gap between two free claims. */
-    freeCooldownMs: 24 * 60 * 60 * 1000,
-    /** Rewarded-ad ladder: step N pays adStepCoins[N - 1]. */
-    adStepCoins: [150, 250, 400, 700, 1200],
-    adStepCooldownMs: 5 * 60 * 1000
-};
 
 /** Invite rewards. Paid to the invitee on claim and to the inviter once. */
 const REFERRAL = {
@@ -446,7 +418,6 @@ module.exports = {
     MATCH,
     MATCHMAKING,
     ECONOMY,
-    REWARDS,
     REFERRAL,
     SQUAD,
     SPIN,

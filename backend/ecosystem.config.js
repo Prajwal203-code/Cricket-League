@@ -2,12 +2,14 @@ module.exports = {
   apps: [{
     name: 'cricket-strike',
     script: 'src/server.js',
-    instances: 4, // Matches OCI Ampere A1 4 physical cores
-    exec_mode: 'cluster',
+    // Match ownership and queues are process-local. A Redis broadcast adapter
+    // alone cannot share that state across workers.
+    instances: 1,
+    exec_mode: 'fork',
     max_memory_restart: '500M',
     env: {
       NODE_ENV: 'production',
-      PORT: 3000
+      PORT: 3005
     }
   }]
 };

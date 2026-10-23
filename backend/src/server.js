@@ -14,6 +14,8 @@ const config = require('./config/env');
 const { socketAuth } = require('./middleware/auth');
 const { registerMatchSockets, shutdownMatchSockets } = require('./sockets/matchSocket');
 const { initDatabase, pingDatabase } = require('./config/db');
+const { startRulesRefresh, stopRulesRefresh, rulesHealth } = require('./config/liveRules');
+const { recoverPendingSettlements, recoverAbandonedEntries } = require('./services/matchService');
 
 const app = express();
 const httpServer = createServer(app);
@@ -46,7 +48,7 @@ const corsOptions = {
 // ---------------------------------------------------------------------------
 // Middleware
 // ---------------------------------------------------------------------------
-app.set('trust proxy', 1);
+app.set('trust proxy', config.trustProxy);
 
 app.use(helmet({
     contentSecurityPolicy: {
@@ -68,6 +70,8 @@ app.use(helmet({
             imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
             connectSrc: [
                 "'self'",
+                // GLTFLoader's ImageBitmapLoader fetches embedded textures as blobs.
+                'blob:',
                 'ws:',
                 'wss:',
                 'https://accounts.google.com',
@@ -117,11 +121,12 @@ app.use('/api/auth', rateLimit({
     message: { success: false, code: 'RATE_LIMITED', message: 'Too many sign-in attempts. Try again shortly.' }
 }));
 
+app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 app.use(express.static(path.join(__dirname, '../public'), {
     setHeaders(res, filePath) {
         // The shell must revalidate so a deploy is picked up immediately;
         // fingerprint-free assets are still safe to cache briefly.
-        if (filePath.endsWith('index.html')) {
+        if (/\.(html|js|css)$/.test(filePath)) {
             res.setHeader('Cache-Control', 'no-cache');
         }
     }
@@ -182,7 +187,7 @@ registerMatchSockets(io);
 app.get('/api/health', async (req, res) => {
     try {
         await pingDatabase();
-        res.json({ status: 'ok', database: 'up', timestamp: new Date().toISOString() });
+        res.json({ status: 'ok', database: 'up', progression: rulesHealth(), timestamp: new Date().toISOString() });
     } catch (err) {
         console.error('[health] database unreachable:', err.message);
         res.status(503).json({ status: 'degraded', database: 'down', timestamp: new Date().toISOString() });
@@ -190,6 +195,7 @@ app.get('/api/health', async (req, res) => {
 });
 
 app.use('/api/auth', require('./routes/auth.routes'));
+app.use('/api/config', require('./routes/config.routes'));
 app.use('/api/tours', require('./routes/tour.routes'));
 app.use('/api/user', require('./routes/user.routes'));
 app.use('/api/shop', require('./routes/shop.routes'));
@@ -217,6 +223,7 @@ app.use('/api', (req, res) => {
 
 // Client-side routes fall back to the app shell.
 app.get('*', (req, res) => {
+    if (path.extname(req.path)) return res.status(404).end();
     res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
@@ -251,6 +258,9 @@ app.use((err, req, res, next) => {
 
 async function bootstrap() {
     await initDatabase();
+    while (await recoverPendingSettlements()) { /* drain durable payouts before refunds */ }
+    await recoverAbandonedEntries();
+    startRulesRefresh();
 
     await new Promise((resolve, reject) => {
         httpServer.listen(config.port, resolve);
@@ -270,6 +280,7 @@ async function shutdown(signal) {
     console.log(`\n${signal} received — shutting down.`);
 
     shutdownMatchSockets();
+    stopRulesRefresh();
     io.close();
 
     httpServer.close(() => {
@@ -287,9 +298,11 @@ async function shutdown(signal) {
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
-bootstrap().catch(err => {
-    console.error('❌ Failed to start:', err);
-    process.exit(1);
-});
+if (require.main === module) {
+    bootstrap().catch(err => {
+        console.error('❌ Failed to start:', err);
+        process.exit(1);
+    });
+}
 
 module.exports = { app, io, httpServer, bootstrap, shutdown };

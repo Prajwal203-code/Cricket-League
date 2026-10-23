@@ -17,6 +17,8 @@ const { getPool } = require('../config/db');
 const { requireAuth } = require('../middleware/auth');
 const { applyWalletDelta } = require('../services/userService');
 const { STREAK } = require('../config/gameRules');
+const { getRules } = require('../config/liveRules');
+const { levelMultiplier } = require('../services/progression');
 
 router.use(requireAuth);
 
@@ -99,10 +101,10 @@ function gemBonusForLevel(level) {
     return Math.floor((Math.max(1, level) - 1) / STREAK.gemBonusPerLevels);
 }
 
-function rewardForDay(dayDef, level) {
+function rewardForDay(dayDef, level, rules) {
     const bonus = gemBonusForLevel(level);
     return {
-        coins: dayDef.baseCoins || 0,
+        coins: Math.round((dayDef.baseCoins || 0) * levelMultiplier(level, rules)),
         gems: dayDef.baseGems > 0 ? dayDef.baseGems + bonus : 0
     };
 }
@@ -119,11 +121,12 @@ router.get('/status', async (req, res, next) => {
         const pool = getPool();
         const todayStr = getLocalDateString();
 
-        const [userRows] = await pool.query('SELECT level FROM users WHERE id = ?', [req.userId]);
+        const [userRows] = await pool.query('SELECT level FROM users WHERE id = ? FOR UPDATE', [req.userId]);
         if (userRows.length === 0) {
             return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Account not found.' });
         }
         const userLevel = userRows[0].level || 1;
+        const rules = getRules();
 
         const [rows] = await pool.query(
             'SELECT * FROM user_daily_streaks WHERE user_id = ?',
@@ -133,16 +136,16 @@ router.get('/status', async (req, res, next) => {
         const state = resolveStreak(rows[0] || null, todayStr);
 
         const calendar = STREAK.days.map(d => {
-            const reward = rewardForDay(d, userLevel);
+            const reward = rewardForDay(d, userLevel, rules);
             const isToday = d.day === state.currentDay;
             return {
                 day: d.day,
                 icon: d.icon,
-                label: d.label,
-                pill: d.baseGems > 0 ? `+${reward.gems} 💎` : d.pill,
+                label: [reward.coins ? `${reward.coins.toLocaleString()} Coins` : '', reward.gems ? `${reward.gems} Gems` : ''].filter(Boolean).join(' + '),
+                pill: [reward.coins ? `+${reward.coins.toLocaleString()} coins` : '', reward.gems ? `+${reward.gems} gems` : ''].filter(Boolean).join(' / '),
                 coins: reward.coins,
                 gems: reward.gems,
-                pack: d.pack,
+                pack: null,
                 isMega: !!d.isMega,
                 isClaimed: state.claimedDays.includes(d.day),
                 isToday,
@@ -176,12 +179,13 @@ router.post('/claim', async (req, res, next) => {
         const todayStr = getLocalDateString();
         await conn.beginTransaction();
 
-        const [userRows] = await conn.query('SELECT level FROM users WHERE id = ?', [req.userId]);
+        const [userRows] = await conn.query('SELECT level FROM users WHERE id = ? FOR UPDATE', [req.userId]);
         if (userRows.length === 0) {
             await conn.rollback();
             return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Account not found.' });
         }
         const userLevel = userRows[0].level || 1;
+        const rules = getRules();
 
         // Ensure a row exists so the lock below has something to hold. The
         // no-op update makes this safe to run concurrently.
@@ -209,7 +213,7 @@ router.post('/claim', async (req, res, next) => {
         }
 
         const dayDef = STREAK.days.find(d => d.day === state.currentDay) || STREAK.days[0];
-        const reward = rewardForDay(dayDef, userLevel);
+        const reward = rewardForDay(dayDef, userLevel, rules);
 
         const claimedDays = state.claimedDays.includes(state.currentDay)
             ? state.claimedDays
@@ -223,8 +227,8 @@ router.post('/claim', async (req, res, next) => {
 
         const wallet = await applyWalletDelta(req.userId, {
             coins: reward.coins,
-            gems: reward.gems
-        }, conn);
+            gems: reward.gems, reason: 'daily_streak'
+        }, conn, rules);
 
         await conn.commit();
 
@@ -240,7 +244,7 @@ router.post('/claim', async (req, res, next) => {
             gems: wallet.user.gems,
             coinsAwarded: reward.coins,
             gemsAwarded: reward.gems,
-            pack: dayDef.pack,
+            pack: null,
             rewardText,
             message: `Day ${state.currentDay} Bonus Collected: ${rewardText}!`
         });

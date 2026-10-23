@@ -1,0 +1,241 @@
+{
+  "revision": 1,
+  "xp": {
+    "base": 50,
+    "exponent": 1.35,
+    "maxLevel": 10000
+  },
+  "levelUpCoinsPerLevel": 100,
+  "levelScaling": {
+    "perLevel": 0.02,
+    "maximum": 3
+  },
+  "milestones": {
+    "every": 5,
+    "majorEvery": 10,
+    "coinsPerLevelAfter50": 10000,
+    "gemsPerLevelAfter50": 10,
+    "maxCoins": 5000000,
+    "maxGems": 10000,
+    "legacy": [
+      {
+        "coins": 500,
+        "gems": 25
+      },
+      {
+        "coins": 1000,
+        "gems": 15
+      },
+      {
+        "coins": 1500,
+        "gems": 20
+      },
+      {
+        "coins": 2000,
+        "gems": 25
+      },
+      {
+        "coins": 3500,
+        "gems": 50
+      },
+      {
+        "coins": 4000,
+        "gems": 30
+      },
+      {
+        "coins": 5000,
+        "gems": 35
+      },
+      {
+        "coins": 6000,
+        "gems": 40
+      },
+      {
+        "coins": 7500,
+        "gems": 45
+      },
+      {
+        "coins": 12000,
+        "gems": 100
+      },
+      {
+        "coins": 13000,
+        "gems": 50
+      },
+      {
+        "coins": 14000,
+        "gems": 55
+      },
+      {
+        "coins": 15000,
+        "gems": 60
+      },
+      {
+        "coins": 16500,
+        "gems": 65
+      },
+      {
+        "coins": 22000,
+        "gems": 150
+      },
+      {
+        "coins": 24000,
+        "gems": 75
+      },
+      {
+        "coins": 26000,
+        "gems": 80
+      },
+      {
+        "coins": 28000,
+        "gems": 85
+      },
+      {
+        "coins": 30000,
+        "gems": 90
+      },
+      {
+        "coins": 40000,
+        "gems": 250
+      },
+      {
+        "coins": 42000,
+        "gems": 100
+      },
+      {
+        "coins": 45000,
+        "gems": 105
+      },
+      {
+        "coins": 48000,
+        "gems": 110
+      },
+      {
+        "coins": 52000,
+        "gems": 115
+      },
+      {
+        "coins": 65000,
+        "gems": 350
+      },
+      {
+        "coins": 70000,
+        "gems": 125
+      },
+      {
+        "coins": 75000,
+        "gems": 130
+      },
+      {
+        "coins": 80000,
+        "gems": 135
+      },
+      {
+        "coins": 85000,
+        "gems": 140
+      },
+      {
+        "coins": 100000,
+        "gems": 500
+      },
+      {
+        "coins": 110000,
+        "gems": 150
+      },
+      {
+        "coins": 120000,
+        "gems": 160
+      },
+      {
+        "coins": 130000,
+        "gems": 170
+      },
+      {
+        "coins": 140000,
+        "gems": 180
+      },
+      {
+        "coins": 165000,
+        "gems": 600
+      },
+      {
+        "coins": 175000,
+        "gems": 190
+      },
+      {
+        "coins": 185000,
+        "gems": 200
+      },
+      {
+        "coins": 195000,
+        "gems": 210
+      },
+      {
+        "coins": 210000,
+        "gems": 220
+      },
+      {
+        "coins": 250000,
+        "gems": 750
+      },
+      {
+        "coins": 260000,
+        "gems": 230
+      },
+      {
+        "coins": 275000,
+        "gems": 240
+      },
+      {
+        "coins": 290000,
+        "gems": 250
+      },
+      {
+        "coins": 310000,
+        "gems": 260
+      },
+      {
+        "coins": 350000,
+        "gems": 900
+      },
+      {
+        "coins": 370000,
+        "gems": 280
+      },
+      {
+        "coins": 390000,
+        "gems": 300
+      },
+      {
+        "coins": 410000,
+        "gems": 320
+      },
+      {
+        "coins": 440000,
+        "gems": 350
+      },
+      {
+        "coins": 500000,
+        "gems": 1500
+      }
+    ]
+  },
+  "match": {
+    "winXpPerTier": 15,
+    "lossXp": 5,
+    "tieXp": 8,
+    "xpPerSix": 2,
+    "xpPerRun": 1,
+    "xpPerWicket": 4,
+    "maxPerformanceXp": 50,
+    "maxTourTier": 10,
+    "consolationCoins": 20,
+    "trophiesPerWin": 8,
+    "trophiesPerLoss": -5
+  },
+  "free": {
+    "coins": 100,
+    "xp": 10,
+    "cooldownMs": 86400000
+  }
+}

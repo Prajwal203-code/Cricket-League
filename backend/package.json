@@ -5,10 +5,12 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js",
-    "test": "node --test test/",
+    "dev": "node --watch src/server.js",
+    "test": "node --test",
     "migrate": "node src/config/migrate.js",
-    "cluster": "pm2 start ecosystem.config.js"
+    "backup": "node scripts/backup-database.js",
+    "cluster": "pm2 start ecosystem.config.js",
+    "rules": "node scripts/progression-rules.js"
   },
   "dependencies": {
     "@socket.io/redis-adapter": "^8.3.0",
@@ -25,13 +27,12 @@
     "socket.io": "^4.7.5"
   },
   "devDependencies": {
-    "nodemon": "^3.1.0",
     "socket.io-client": "^4.8.3"
   },
   "overrides": {
     "qs": "^6.16.0"
   },
   "engines": {
-    "node": ">=18.17.0"
+    "node": ">=22"
   }
 }

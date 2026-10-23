@@ -416,7 +416,8 @@ function publicState(match, forUserId) {
         strikerId: strikerId(match),
         bowlerId: bowlerId(match),
         winnerUserId: match.winnerUserId,
-        endReason: match.endReason
+        endReason: match.endReason,
+        pendingBowl: match.pendingBowl ? { ...match.pendingBowl, perfectAtMs: Math.round(match.pendingBowl.flightMs * TIMING.perfectAtRatio) } : null
     };
 }
 

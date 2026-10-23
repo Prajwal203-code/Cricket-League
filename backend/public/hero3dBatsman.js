@@ -1,14 +1,7 @@
 /**
- * 🏏 Cricket League — Realistic 3D Human Cricketer Engine (Shannon)
- * ---------------------------------------------------------------------------
- * Features:
- * 1. Authentic 3D Rigged Human Athlete (Shannon) with realistic physique & anatomy.
- * 2. Official Team India Kit with dynamic user-customized Squad Number and Player Name.
- * 3. Authentic Grounded Cricket Batting Stance: hands at waist, bat pointing DOWN to turf.
- * 4. Rhythmic bat tapping on the pitch turf in the crease (tap... tap... pause... tap...).
- * 5. Professional contoured white PU leather batting pads (snug fit, knee rolls, velcro straps).
- * 6. English Willow cricket bat with chevron rubber grip and thick profile blade.
- * 7. Live real-time updates when user edits jersey name or number in Character Studio.
+ * Home and character-studio renderer.
+ * Home uses the reconstructed shoulder-bat reference. The editable studio and
+ * match equipment retain CricketPlayerRig and live jersey customization.
  */
 (function (window) {
     'use strict';
@@ -81,18 +74,23 @@
     // 3D Player Assets
     let shannonMesh = null;
     let shannonBones = null;
-    let shannonMixer = null;
+    let poseController = null;
+    let loadGeneration = 0;
+    let equipment = {};
     let batGroup = null;
     let currentJerseyTexture = null;
     let jerseyCanvas = null;
     let jerseyBaseImage = null;
     let isLoadingShannon = false;
+    let referenceMode = false;
+    let dragDistance = 0;
+    let controlsAbort = null;
 
     // Interaction / Animation state
     let isDragging = false, startX = 0, startY = 0;
-    let targetRotY = -0.32, curRotY = -0.32, velRotY = 0;
+    let targetRotY = 0.62, curRotY = 0.62, velRotY = 0;
     let targetRotX = 0, curRotX = 0, velRotX = 0;
-    let breath = 0, baseY = 0, isSwinging = false, swingProgress = 0, animId = null;
+    let breath = 0, isSwinging = false, swingProgress = 0, animId = null;
 
     // =====================================================================
     // Authentic International Cricket Equipment Builders
@@ -127,15 +125,15 @@
         }
 
         // Willow Blade (International Grade 1 English Willow)
-        // Starts at y = -0.26 and extends down to y = -0.84m (total 0.84m standard)
-        const bladeGeo = new THREE.BoxGeometry(0.108, 0.58, 0.048);
+        // Blade extends from y = -0.26 to -0.90 metres.
+        const bladeGeo = new THREE.BoxGeometry(0.108, 0.64, 0.048);
         const willowMat = new THREE.MeshStandardMaterial({
             color: 0xd9b37a, // Natural Golden English Willow tint
             roughness: 0.48,
             metalness: 0.02
         });
         const blade = new THREE.Mesh(bladeGeo, willowMat);
-        blade.position.y = -0.26 - 0.29; // -0.55m
+        blade.position.y = -0.26 - 0.32;
         blade.castShadow = true;
         blade.receiveShadow = true;
         bat.add(blade);
@@ -155,76 +153,67 @@
         const toeGeo = new THREE.BoxGeometry(0.109, 0.015, 0.049);
         const toeMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 });
         const toe = new THREE.Mesh(toeGeo, toeMat);
-        toe.position.set(0, -0.835, 0);
+        toe.position.set(0, -0.895, 0);
         bat.add(toe);
 
         return bat;
     }
 
     // 2. Realistic Contoured White PU Batting Pads (Snug fit to shins, no radiator slats!)
+    function paddedBlock(width, height, depth, material) {
+        const shape = new THREE.Shape();
+        const x = -width / 2, y = -height / 2, r = Math.min(width, height) * .18;
+        shape.moveTo(x + r, y);
+        shape.lineTo(x + width - r, y);
+        shape.quadraticCurveTo(x + width, y, x + width, y + r);
+        shape.lineTo(x + width, y + height - r);
+        shape.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+        shape.lineTo(x + r, y + height);
+        shape.quadraticCurveTo(x, y + height, x, y + height - r);
+        shape.lineTo(x, y + r);
+        shape.quadraticCurveTo(x, y, x + r, y);
+        const geometry = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelThickness: .004,
+            bevelSize: .004, bevelSegments: 2, steps: 1, curveSegments: 5 });
+        geometry.translate(0, 0, -depth / 2);
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.castShadow = true;
+        return mesh;
+    }
+
     function createCricketPadMesh(isLeft) {
         const pad = new THREE.Group();
-        pad.name = isLeft ? "Pad_Left" : "Pad_Right";
-
-        const whiteMat = new THREE.MeshStandardMaterial({
-            color: 0xf8fafc,
-            roughness: 0.35,
-            metalness: 0.04
-        });
-        const strapMat = new THREE.MeshStandardMaterial({
-            color: 0x0f2d59, // Navy Blue Velcro Straps
-            roughness: 0.65,
-            metalness: 0.02
-        });
-        const goldMat = new THREE.MeshStandardMaterial({
-            color: 0xfacc15,
-            roughness: 0.40,
-            metalness: 0.30
-        });
-
-        // 1. Main Curved Shin Shield (Smooth PU Leather Face)
-        // Cylinder arc covering front 120 degrees of shin
-        const shinGeo = new THREE.CylinderGeometry(0.082, 0.072, 0.44, 24, 1, false, -Math.PI * 0.33, Math.PI * 0.66);
-        const shin = new THREE.Mesh(shinGeo, whiteMat);
-        shin.castShadow = true;
-        shin.receiveShadow = true;
-        pad.add(shin);
-
-        // 2. Padded Knee Roll (3 horizontal rounded rolls over knee cap)
-        for (let k = -1; k <= 1; k++) {
-            const rollGeo = new THREE.TorusGeometry(0.085, 0.012, 10, 20, Math.PI * 0.65);
-            const roll = new THREE.Mesh(rollGeo, whiteMat);
-            roll.position.set(0, 0.11 + k * 0.024, 0);
-            roll.rotation.set(Math.PI / 2, 0, -Math.PI * 0.325);
-            roll.castShadow = true;
+        pad.name = isLeft ? 'BattingPadLeft' : 'BattingPadRight';
+        const white = new THREE.MeshStandardMaterial({ color: '#d9d8d1', roughness: .82 });
+        const navy = new THREE.MeshStandardMaterial({ color: '#102647', roughness: .9 });
+        pad.add(paddedBlock(.17, .48, .065, white));
+        for (let i = -3; i <= 3; i++) {
+            const rib = paddedBlock(.017, .32, .025, white);
+            rib.position.set(i * .023, -.045, .04);
+            pad.add(rib);
+        }
+        for (const y of [.125, .16]) {
+            const roll = paddedBlock(.16, .025, .03, white);
+            roll.position.set(0, y, .045);
             pad.add(roll);
         }
-
-        // 3. Top Hat (Curved upper flap protecting lower thigh)
-        const topGeo = new THREE.CylinderGeometry(0.088, 0.084, 0.09, 20, 1, false, -Math.PI * 0.30, Math.PI * 0.60);
-        const topHat = new THREE.Mesh(topGeo, whiteMat);
-        topHat.position.set(0, 0.20, 0);
-        topHat.castShadow = true;
-        pad.add(topHat);
-
-        // Gold pinstripe accent across top hat
-        const trimGeo = new THREE.TorusGeometry(0.089, 0.0035, 8, 20, Math.PI * 0.60);
-        const trim = new THREE.Mesh(trimGeo, goldMat);
-        trim.position.set(0, 0.24, 0);
-        trim.rotation.set(Math.PI / 2, 0, -Math.PI * 0.30);
-        pad.add(trim);
-
-        // 4. Velcro Straps (3 navy straps wrapping around calf)
-        const strapHeights = [-0.13, 0.02, 0.16];
-        strapHeights.forEach(sh => {
-            const strapGeo = new THREE.TorusGeometry(0.076, 0.006, 8, 24, Math.PI * 1.30);
-            const strap = new THREE.Mesh(strapGeo, strapMat);
-            strap.position.set(0, sh, 0);
-            strap.rotation.set(Math.PI / 2, 0, Math.PI * 0.35);
+        for (const y of [-.14, .03, .17]) {
+            const strap = paddedBlock(.18, .027, .02, navy);
+            strap.position.set(0, y, -.04);
             pad.add(strap);
-        });
-
+        }
         return pad;
+    }
+
+    function createBattingGlove() {
+        const glove = new THREE.Group();
+        const white = new THREE.MeshStandardMaterial({ color: '#e0ded5', roughness: .8 });
+        glove.add(paddedBlock(.077, .075, .065, white));
+        for (let i = 0; i < 4; i++) {
+            const finger = paddedBlock(.015, .07, .035, white);
+            finger.position.set((i - 1.5) * .019, 0, .038);
+            glove.add(finger);
+        }
+        return glove;
     }
 
     // Dynamic Team India Jersey Texture Generator with User Number & Name
@@ -289,6 +278,7 @@
 
         if (!currentJerseyTexture) {
             currentJerseyTexture = new THREE.CanvasTexture(jerseyCanvas);
+            currentJerseyTexture.encoding = THREE.sRGBEncoding;
             currentJerseyTexture.anisotropy = 8;
         }
         currentJerseyTexture.needsUpdate = true;
@@ -296,11 +286,12 @@
     }
 
     function applyJerseyTextureToModel() {
-        if (!shannonMesh) return;
+        if (!shannonMesh || referenceMode) return;
+        const currentModel = shannonMesh;
         renderDynamicJersey(cfg.kit.number, cfg.kit.name, (tex) => {
-            if (!tex) return;
+            if (!tex || referenceMode || shannonMesh !== currentModel) return;
             shannonMesh.traverse((child) => {
-                if (child.isMesh && child.material) {
+                if (child.isSkinnedMesh && child.material) {
                     const mats = Array.isArray(child.material) ? child.material : [child.material];
                     mats.forEach(m => {
                         const name = (m.name || '').toLowerCase();
@@ -308,6 +299,7 @@
                             m.map = tex;
                             m.roughness = 0.62;
                             m.metalness = 0.05;
+                            if (m.isMeshPhongMaterial) { m.shininess = 8; m.specular.setHex(0x151515); }
                             m.needsUpdate = true;
                         }
                     });
@@ -320,12 +312,20 @@
     // Lifecycle: init
     // =====================================================================
     function init(canvasId, containerId) {
+        if (renderer) dispose();
         container = document.getElementById(containerId);
         if (!container || !window.THREE) { console.error('❌ Hero3D: missing container or THREE'); return; }
+        referenceMode = containerId === 'heroCharacterStage';
+        targetRotY = curRotY = referenceMode ? 0 : .62;
+        targetRotX = curRotX = velRotY = velRotX = 0;
+        isDragging = isSwinging = false;
+        swingProgress = 0;
+        container.title = referenceMode ? 'Drag to rotate. Tap to return to the front.' : 'Drag to rotate. Tap to swing.';
 
         container.innerHTML = `
             <div class="hero-3d-stage-viewport" id="hero3dViewport" style="position:relative;width:100%;height:100%;overflow:hidden;">
-                <canvas id="hero3dCanvas" style="width:100%;height:100%;display:block;outline:none;touch-action:none;"></canvas>
+                <canvas id="hero3dCanvas" tabindex="0" role="img" aria-label="Cricket player. Use the arrow keys to rotate and Home to reset the view." style="width:100%;height:100%;display:block;touch-action:none;"></canvas>
+                <div id="hero3dStatus" role="status" style="position:absolute;top:15%;left:0;right:0;text-align:center;pointer-events:none;">Loading player…</div>
                 <div class="hero-3d-ground-shadow"></div>
                 <div class="hero-character-aura"></div>
                 <div class="practice-toast hidden" id="practiceToast">POWERFUL SHOT! 🏏🔥</div>
@@ -341,7 +341,7 @@
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         renderer.outputEncoding = THREE.sRGBEncoding;
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.05;
+        renderer.toneMappingExposure = 0.92;
         renderer.shadowMap.enabled = true;
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -354,12 +354,19 @@
             }
         } catch (e) { console.warn('Hero3D: IBL unavailable', e); }
 
-        camera = new THREE.PerspectiveCamera(30, w / h, 0.1, 100);
-        camera.position.set(0, 1.00, 3.75);
-        camera.lookAt(0, 0.90, 0);
+        if (referenceMode) {
+            camera = new THREE.OrthographicCamera(-1, 1, 1, -1, .1, 100);
+            camera.position.set(0, .85, 6);
+            camera.lookAt(0, .85, 0);
+            fitReferenceCamera(w, h);
+        } else {
+            camera = new THREE.PerspectiveCamera(30, w / h, 0.1, 100);
+            camera.position.set(0, 1.00, 4.05);
+            camera.lookAt(0, .84, 0);
+        }
 
         root = new THREE.Group();
-        root.position.x = 0.18; // offset clear of left-hand UI buttons
+        root.position.x = referenceMode ? .045 : -.035;
         scene.add(root);
 
         setupLighting();
@@ -367,9 +374,8 @@
         rig = new THREE.Group();
         root.add(rig);
 
-        // Load realistic Shannon Cricketer
+        // Load the appropriate home reference or editable studio model.
         rebuild();
-        baseY = 0;
 
         setupDragControls();
         window.addEventListener('resize', onResize);
@@ -379,16 +385,29 @@
         }
         if (animId) cancelAnimationFrame(animId);
         animate();
-        console.log('✅ Hero3D Realistic Cricketer (Shannon) active');
+        console.log('Hero3D player preview active');
     }
 
     function dispose() {
         try {
+            loadGeneration++;
+            isLoadingShannon = false;
+            poseController = null;
+            equipment = {};
+            batGroup = null;
+            controlsAbort?.abort();
+            controlsAbort = null;
             if (animId) cancelAnimationFrame(animId);
             animId = null;
             if (ro) { ro.disconnect(); ro = null; }
             window.removeEventListener('resize', onResize);
-            if (rig) disposeTree(rig);
+            if (scene) {
+                scene.environment?.dispose();
+                disposeTree(scene);
+            }
+            pmrem?.dispose();
+            pmrem = null;
+            currentJerseyTexture = null;
             if (renderer) {
                 renderer.dispose();
                 const gl = renderer.getContext && renderer.getContext();
@@ -397,7 +416,7 @@
             }
         } catch (e) { }
         try { if (container) container.innerHTML = ''; } catch (e2) { }
-        scene = camera = renderer = rig = root = container = shannonMesh = shannonBones = shannonMixer = null;
+        scene = camera = renderer = rig = root = container = shannonMesh = shannonBones = null;
     }
 
     function measure() {
@@ -406,10 +425,10 @@
     }
 
     function setupLighting() {
-        scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+        scene.add(new THREE.AmbientLight(0xffffff, 0.30));
         scene.add(new THREE.HemisphereLight(0xdfe9ff, 0x20304a, 0.50));
 
-        const key = new THREE.DirectionalLight(0xfff4e6, 2.8);
+        const key = new THREE.DirectionalLight(0xfff4e6, 1.8);
         key.position.set(2.6, 5.2, 4.2);
         key.castShadow = true;
         key.shadow.mapSize.set(2048, 2048);
@@ -419,11 +438,11 @@
         key.shadow.bias = -0.0004;
         scene.add(key);
 
-        const fill = new THREE.DirectionalLight(0x93c5fd, 1.2);
+        const fill = new THREE.DirectionalLight(0x93c5fd, .65);
         fill.position.set(-3.5, 2.0, 2.5);
         scene.add(fill);
 
-        const rim = new THREE.DirectionalLight(0xffe8c2, 2.0);
+        const rim = new THREE.DirectionalLight(0xffe8c2, 1.1);
         rim.position.set(-1.2, 3.8, -4.5);
         scene.add(rim);
 
@@ -439,10 +458,69 @@
 
     function disposeTree(obj) {
         if (!obj) return;
+        const textures = new Set();
         obj.traverse((o) => {
             if (o.geometry) o.geometry.dispose();
-            if (o.material) { (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose()); }
+            if (o.material) { (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => {
+                Object.values(m).forEach(value => { if (value?.isTexture) textures.add(value); });
+                m.dispose();
+            }); }
         });
+        textures.forEach(texture => texture.dispose());
+    }
+
+    function fitReferenceCamera(w, h) {
+        const aspect = w / h;
+        const height = Math.max(2.65, 1.25 / aspect);
+        camera.left = -height * aspect / 2;
+        camera.right = height * aspect / 2;
+        camera.top = height / 2;
+        camera.bottom = -height / 2;
+        camera.updateProjectionMatrix();
+    }
+
+    function loadReferencePlayer() {
+        const generation = ++loadGeneration;
+        const fail = (error) => {
+            if (generation !== loadGeneration || !container) return;
+            isLoadingShannon = false;
+            console.error('Hero3D: could not load the reference GLB', error);
+            const status = container.querySelector('#hero3dStatus');
+            if (status) {
+                status.textContent = 'Could not load the 3D player. ';
+                status.style.pointerEvents = 'auto';
+                const retry = document.createElement('button');
+                retry.type = 'button';
+                retry.textContent = 'Retry';
+                retry.style.cssText = 'min-height:44px;padding:8px 16px;cursor:pointer;';
+                retry.onclick = (event) => {
+                    event.stopPropagation();
+                    status.textContent = 'Loading 3D player…';
+                    status.style.pointerEvents = 'none';
+                    rebuild();
+                };
+                status.appendChild(retry);
+            }
+        };
+        if (!THREE.GLTFLoader) { fail(new Error('GLTFLoader is unavailable')); return; }
+        new THREE.GLTFLoader().load('models/hero_reference_reconstruction.glb?v=2', (gltf) => {
+            if (generation !== loadGeneration || !rig) { disposeTree(gltf.scene); return; }
+            isLoadingShannon = false;
+            shannonMesh = gltf.scene;
+            shannonMesh.name = 'ReferenceShoulderBatPlayer';
+            shannonMesh.traverse(child => {
+                if (!child.isMesh) return;
+                child.castShadow = true;
+                const materials = Array.isArray(child.material) ? child.material : [child.material];
+                materials.forEach(material => {
+                    // The reference contains baked lighting; preserve its colors.
+                    material.toneMapped = false;
+                    if (material.map) material.map.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+                });
+            });
+            rig.add(shannonMesh);
+            container.querySelector('#hero3dStatus')?.remove();
+        }, undefined, fail);
     }
 
     // =====================================================================
@@ -451,10 +529,11 @@
     function rebuild() {
         if (!rig || isLoadingShannon) return;
         if (shannonMesh) {
-            applyJerseyTextureToModel();
+            if (!referenceMode) applyJerseyTextureToModel();
             return;
         }
         isLoadingShannon = true;
+        if (referenceMode) { loadReferencePlayer(); return; }
 
         while (rig.children.length) {
             const c = rig.children.pop();
@@ -467,108 +546,97 @@
             return;
         }
 
+        const generation = ++loadGeneration;
         const loader = new THREE.FBXLoader();
         loader.load('models/shannon_idle.fbx', (fbx) => {
+            if (generation !== loadGeneration || !rig) { disposeTree(fbx); return; }
             isLoadingShannon = false;
-            while (rig.children.length) {
-                const c = rig.children.pop();
-                rig.remove(c);
-            }
             shannonMesh = fbx;
+            container.querySelector('#hero3dStatus')?.remove();
             shannonMesh.scale.setScalar(0.0104);
-            shannonMesh.position.set(0, 0, 0);
-
-            // Setup Animation Mixer
-            if (fbx.animations && fbx.animations.length > 0) {
-                shannonMixer = new THREE.AnimationMixer(fbx);
-                const idleAction = shannonMixer.clipAction(fbx.animations[0]);
-                idleAction.play();
-            }
-
-            // Map skeleton bones
-            shannonBones = {};
-            shannonMesh.traverse((child) => {
-                if (child.isBone) {
-                    const name = (child.name || '').toLowerCase();
-                    if (name.includes('head') && !name.includes('top')) shannonBones.head = child;
-                    else if (name.includes('neck')) shannonBones.neck = child;
-                    else if (name.includes('spine2')) shannonBones.spine2 = child;
-                    else if (name.includes('spine')) shannonBones.spine = child;
-                    else if (name.includes('hips')) shannonBones.hips = child;
-                    else if (name.includes('rightarm') && !name.includes('fore')) shannonBones.rightArm = child;
-                    else if (name.includes('leftarm') && !name.includes('fore')) shannonBones.leftArm = child;
-                    else if (name.includes('rightforearm')) shannonBones.rightForeArm = child;
-                    else if (name.includes('leftforearm')) shannonBones.leftForeArm = child;
-                    else if (name.includes('righthand') && !name.includes('finger')) shannonBones.rightHand = child;
-                    else if (name.includes('lefthand') && !name.includes('finger')) shannonBones.leftHand = child;
-                    else if (name.includes('rightleg') && !name.includes('up')) shannonBones.rightLeg = child;
-                    else if (name.includes('leftleg') && !name.includes('up')) shannonBones.leftLeg = child;
-                    else if (name.includes('rightupleg')) shannonBones.rightUpLeg = child;
-                    else if (name.includes('leftupleg')) shannonBones.leftUpLeg = child;
-                }
-            });
-
-            const boneScale = 1.0 / 0.0104; // 96.15
-
-            // 1. High-Quality Contoured White PU Batting Pads (Snug on shins!)
-            if (cfg.gear.pads?.on !== false) {
-                if (shannonBones.leftLeg) {
-                    const padL = createCricketPadMesh(true);
-                    padL.scale.setScalar(boneScale * 0.88);
-                    padL.position.set(0, -22, 5.0);
-                    padL.rotation.set(0, 0, 0);
-                    shannonBones.leftLeg.add(padL);
-                }
-                if (shannonBones.rightLeg) {
-                    const padR = createCricketPadMesh(false);
-                    padR.scale.setScalar(boneScale * 0.88);
-                    padR.position.set(0, -22, 5.0);
-                    padR.rotation.set(0, 0, 0);
-                    shannonBones.rightLeg.add(padR);
-                }
-            }
-
-            // 2. English Willow Cricket Bat in Hand Grip (Grounded pointing down!)
-            batGroup = createEnglishWillowBat();
-            batGroup.scale.setScalar(boneScale);
-            if (shannonBones.rightHand) {
-                shannonBones.rightHand.add(batGroup);
-                batGroup.position.set(0, -4, 0);
-                batGroup.rotation.set(0.12, 0.05, -0.10);
-            }
-
-            // Apply Dynamic Team India Royal Blue Jersey with user number & name
-            applyJerseyTextureToModel();
-
             rig.add(shannonMesh);
+
+            // Use the imported neutral transforms; the bundled clip is a baseball idle.
+            // The FBX has same-name helper joints for separate clothing meshes. The
+            // pose controller targets the parent joints shared by body and clothing.
+            equipment = createEquipment();
+            Object.values(equipment).forEach(item => rig.add(item));
+            batGroup = equipment.bat;
+            poseController = window.CricketPlayerRig.create(shannonMesh, rig, equipment);
+            shannonBones = poseController.bones;
+            updateEquipment();
+            applyJerseyTextureToModel();
+            poseController.update(0, 0);
+        }, undefined, () => {
+            if (generation !== loadGeneration) return;
+            isLoadingShannon = false;
+            console.warn('Player model could not load. Reopen the player editor to retry.');
         });
+    }
+
+    function updateEquipment() {
+        configureEquipment(equipment, cfg);
+    }
+
+    function configureEquipment(items, settings) {
+        for (const side of ['left', 'right']) {
+            if (items[`${side}Pad`]) items[`${side}Pad`].visible = settings.gear.pads?.on !== false;
+            if (items[`${side}Glove`]) items[`${side}Glove`].visible = settings.gear.gloves?.on !== false;
+        }
+    }
+
+    function createEquipment() {
+        return { bat: createEnglishWillowBat(), leftPad: createCricketPadMesh(true), rightPad: createCricketPadMesh(false),
+            leftGlove: createBattingGlove(), rightGlove: createBattingGlove() };
     }
 
     // =====================================================================
     // Interaction & Animation Loop
     // =====================================================================
     function setupDragControls() {
+        controlsAbort = new AbortController();
+        const options = { signal: controlsAbort.signal };
         container.addEventListener('pointerdown', (e) => {
+            if (e.target.closest?.('button')) return;
+            if (e.button !== 0) return;
+            dragDistance = 0;
             isDragging = true; startX = e.clientX; startY = e.clientY; velRotY = velRotX = 0;
             container.setPointerCapture?.(e.pointerId);
-        });
+        }, options);
         container.addEventListener('pointermove', (e) => {
             if (!isDragging) return;
             const dx = e.clientX - startX, dy = e.clientY - startY;
+            dragDistance += Math.abs(dx) + Math.abs(dy);
             startX = e.clientX; startY = e.clientY;
             targetRotY += dx * 0.012; targetRotX += dy * 0.006;
             targetRotX = Math.max(-0.18, Math.min(0.18, targetRotX));
             velRotY = dx * 0.010; velRotX = dy * 0.005;
-        });
-        const up = () => {
-            if (isDragging && Math.abs(velRotY) < 0.004) triggerSwing();
+        }, options);
+        const up = (e) => {
+            if (isDragging && e.type === 'pointerup' && dragDistance < 6) triggerSwing();
             isDragging = false;
         };
-        container.addEventListener('pointerup', up);
-        container.addEventListener('pointercancel', up);
+        container.addEventListener('pointerup', up, options);
+        container.addEventListener('pointercancel', up, options);
+        canvas.addEventListener('keydown', e => {
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                e.preventDefault();
+                velRotY = 0;
+                targetRotY += e.key === 'ArrowLeft' ? -.15 : .15;
+            } else if (e.key === 'Home') {
+                e.preventDefault();
+                resetView();
+            }
+        }, options);
+    }
+
+    function resetView() {
+        targetRotY = referenceMode ? 0 : .62;
+        targetRotX = velRotY = velRotX = 0;
     }
 
     function triggerSwing() {
+        if (referenceMode) { resetView(); return; }
         if (isSwinging || !root) return;
         isSwinging = true;
         swingProgress = 0;
@@ -582,6 +650,10 @@
 
     function animate() {
         animId = requestAnimationFrame(animate);
+        if (document.hidden || !container?.isConnected || container.closest('.hidden')) {
+            clock?.getDelta();
+            return;
+        }
         const dt = clock ? Math.min(clock.getDelta(), 0.1) : 0.016;
         const elapsedTime = clock ? clock.getElapsedTime() : breath;
         breath += 0.02;
@@ -599,89 +671,11 @@
             root.rotation.x = curRotX;
         }
 
-        // Mocap animation update (provides breathing & spine motion)
-        if (shannonMixer && !isSwinging) {
-            shannonMixer.update(dt);
-        }
-
         if (isSwinging) {
-            swingProgress += dt * 3.4;
-            if (shannonBones) {
-                // Dynamic cricket drive / lofted shot
-                if (swingProgress < 0.35) {
-                    const p = swingProgress / 0.35;
-                    if (shannonBones.rightArm) shannonBones.rightArm.rotation.set(0.35 - p * 0.6, -0.15, -1.25 + p * 1.8);
-                    if (shannonBones.leftArm) shannonBones.leftArm.rotation.set(0.38 - p * 0.5, 0.20, 1.25 - p * 1.5);
-                    if (batGroup) batGroup.rotation.x = 0.12 - p * 1.4;
-                } else if (swingProgress < 0.75) {
-                    const p = (swingProgress - 0.35) / 0.40;
-                    if (shannonBones.rightArm) shannonBones.rightArm.rotation.set(-0.25 + p * 1.5, -0.15, 0.55 - p * 1.2);
-                    if (shannonBones.leftArm) shannonBones.leftArm.rotation.set(-0.12 + p * 1.2, 0.20, -0.25 + p * 1.0);
-                    if (batGroup) batGroup.rotation.x = -1.28 + p * 2.8;
-                } else if (swingProgress < 1.0) {
-                    const p = (swingProgress - 0.75) / 0.25;
-                    if (shannonBones.rightArm) shannonBones.rightArm.rotation.set(1.25 - p * 0.90, -0.15, -0.65 - p * 0.60);
-                    if (shannonBones.leftArm) shannonBones.leftArm.rotation.set(1.08 - p * 0.70, 0.20, 0.75 + p * 0.50);
-                    if (batGroup) batGroup.rotation.x = 1.52 - p * 1.40;
-                } else {
-                    isSwinging = false;
-                }
-            } else {
-                if (swingProgress > 1.0) isSwinging = false;
-            }
-        } else {
-            // AUTHENTIC CRICKET BATSMAN IDLE:
-            // Hands held down at waist/crease, bat grounded tapping the turf!
-            const tapPeriod = 1.4;
-            const tapTime = elapsedTime % tapPeriod;
-            let tapAngle = 0;
-            if (tapTime < 0.22) {
-                tapAngle = Math.sin(tapTime / 0.22 * Math.PI) * 0.12;
-            } else if (tapTime > 0.38 && tapTime < 0.60) {
-                tapAngle = Math.sin((tapTime - 0.38) / 0.22 * Math.PI) * 0.12;
-            }
-
-            if (shannonBones) {
-                // 1. Narrow legs from wide baseball split into balanced athletic cricket stance
-                if (shannonBones.rightUpLeg) shannonBones.rightUpLeg.rotation.z = 0.14;
-                if (shannonBones.leftUpLeg) shannonBones.leftUpLeg.rotation.z = -0.14;
-
-                // 2. Hands lowered DOWN to waist level holding the bat handle
-                // Right Arm (bottom hand on grip near groin/hip)
-                if (shannonBones.rightArm) {
-                    shannonBones.rightArm.rotation.set(0.35, -0.15, -1.25);
-                }
-                if (shannonBones.rightForeArm) {
-                    shannonBones.rightForeArm.rotation.set(0.18, 0.10, 0.70 + tapAngle * 0.35);
-                }
-                if (shannonBones.rightHand) {
-                    shannonBones.rightHand.rotation.set(0.12, 0.08, 0.08);
-                }
-
-                // Left Arm (top hand on grip)
-                if (shannonBones.leftArm) {
-                    shannonBones.leftArm.rotation.set(0.38, 0.20, 1.25);
-                }
-                if (shannonBones.leftForeArm) {
-                    shannonBones.leftForeArm.rotation.set(0.15, -0.10, -0.65);
-                }
-
-                // 3. Head turned looking over front shoulder towards camera / bowler
-                if (shannonBones.head) {
-                    shannonBones.head.rotation.set(-0.05, 0.32, 0);
-                }
-
-                // 4. Bat blade grounded on pitch turf, tapping rhythmically
-                if (batGroup) {
-                    batGroup.position.set(0, -4, 0);
-                    batGroup.rotation.set(0.12 - tapAngle * 0.55, 0.05, -0.10);
-                }
-
-                if (root) {
-                    root.position.y = baseY + Math.sin(breath) * 0.006;
-                }
-            }
+            swingProgress = Math.min(1, swingProgress + dt / 1.15);
+            if (swingProgress >= 1) { isSwinging = false; swingProgress = 0; }
         }
+        poseController?.update(elapsedTime, isSwinging ? swingProgress : 0);
 
         if (renderer && scene && camera) renderer.render(scene, camera);
     }
@@ -689,7 +683,8 @@
     function onResize() {
         if (!container || !camera || !renderer) return;
         const { w, h } = measure();
-        camera.aspect = w / h; camera.updateProjectionMatrix();
+        if (referenceMode) fitReferenceCamera(w, h);
+        else { camera.aspect = w / h; camera.updateProjectionMatrix(); }
         renderer.setSize(w, h);
     }
 
@@ -708,6 +703,7 @@
         const prevNumber = cfg.kit.number;
         const prevName = cfg.kit.name;
         cfg = deepMerge(defaultConfig(), next);
+        updateEquipment();
 
         // Instant dynamic texture update if number or name changed
         if (cfg.kit.number !== prevNumber || cfg.kit.name !== prevName) {
@@ -731,7 +727,7 @@
     function setBeard(style, color) { if (style) cfg.beard.style = style; if (color) cfg.beard.color = color; }
     function setKitColors(o) { if (o) Object.assign(cfg.kit, o); applyJerseyTextureToModel(); }
     function setJersey(o) { if (o) Object.assign(cfg.kit, o); applyJerseyTextureToModel(); }
-    function setGear(part, o) { if (part && cfg.gear[part]) { Object.assign(cfg.gear[part], o || {}); } }
+    function setGear(part, o) { if (part && cfg.gear[part]) { Object.assign(cfg.gear[part], o || {}); updateEquipment(); } }
     function setBatSkin(type) { cfg.bat.skin = type || 'willow'; }
     function getConfig() { return JSON.parse(JSON.stringify(cfg)); }
 
@@ -741,7 +737,7 @@
         init, dispose, applyConfig, getConfig,
         setCountry, setFaceType, setSkinTone, setHair, setBeard,
         setKitColors, setJersey, setGear, setBatSkin,
-        triggerSwing, getSettings: getConfig, CATALOG
+        triggerSwing, getSettings: getConfig, CATALOG, createEquipment, configureEquipment
     };
 
     window.__hero3d = {
@@ -749,6 +745,8 @@
         getBat: () => batGroup,
         getMesh: () => shannonMesh,
         getCfg: () => cfg,
+        getPose: () => poseController,
+        getEquipment: () => equipment,
         applyConfig
     };
 

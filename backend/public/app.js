@@ -137,32 +137,11 @@ let gameState = {
     ballSkins: []
 };
 
-// XP Required for Level Formula (Unlimited scaling)
-function getXpForLevel(lvl) {
-    return Math.round(50 * Math.pow(lvl, 1.35));
-}
+// Progression is computed on the server. This is only the current progress-bar target.
+function getXpForLevel() { return gameState.maxXp || 50; }
 
-// Add XP and handle level up
-function addXp(amount, reason = "Game Action") {
-    gameState.xp += amount;
-    let leveledUp = false;
-    let lastNewLevel = gameState.level;
-
-    while (gameState.xp >= getXpForLevel(gameState.level)) {
-        gameState.xp -= getXpForLevel(gameState.level);
-        gameState.level++;
-        leveledUp = true;
-        lastNewLevel = gameState.level;
-    }
-
-    if (leveledUp) {
-        const bonusCoins = lastNewLevel * 100;
-        gameState.coins += bonusCoins;
-        showLevelUpCelebration(lastNewLevel, bonusCoins);
-    }
-
-    updateHud();
-}
+// Compatibility for older feature handlers: refresh, never grant XP locally.
+function addXp() { return initUserProfileFromDb(); }
 
 function showLevelUpCelebration(newLevel, bonusCoins) {
     const modal = document.getElementById('levelUpModal');
@@ -194,6 +173,7 @@ async function initUserProfileFromDb() {
                 gameState.gems = data.user.gems ?? gameState.gems;
                 gameState.level = data.user.level ?? gameState.level;
                 gameState.xp = data.user.xp ?? gameState.xp;
+                gameState.maxXp = data.user.max_xp ?? gameState.maxXp;
                 gameState.matchesPlayed = data.user.matches_played ?? gameState.matchesPlayed;
                 gameState.matchesWon = data.user.matches_won ?? gameState.matchesWon;
                 gameState.totalSixes = data.user.total_sixes ?? gameState.totalSixes;
@@ -444,6 +424,7 @@ document.getElementById('homeTourProgressWidget')?.addEventListener('click', () 
 
 // Switch Screens
 function navigateTo(screenId) {
+    document.body.classList.toggle('match-playing', screenId === 'screen-match');
     document.querySelectorAll('.screen-panel').forEach(p => p.classList.add('hidden'));
     const target = document.getElementById(screenId);
     if (target) target.classList.remove('hidden');
@@ -697,8 +678,8 @@ function renderCurrentCardReveal() {
     setTimeout(() => {
         document.getElementById('flipCardInner')?.classList.add('flipped');
         // Credit Currency
-        if (item.type === 'coins') { gameState.coins += item.amount; updateHud(); }
-        else if (item.type === 'gems') { gameState.gems += item.amount; updateHud(); }
+        if (item.type === 'coins') { /* Balance is refreshed from the server. */ updateHud(); }
+        else if (item.type === 'gems') { /* Balance is refreshed from the server. */ updateHud(); }
     }, 180);
 }
 
@@ -930,7 +911,7 @@ function renderClubChat(messages) {
                         });
                         if (donRes.ok) {
                             const donData = await donRes.json();
-                            gameState.coins += donData.coinsEarned || 50;
+                            /* Balance is refreshed from the server. */
                             addXp(donData.xpEarned || 10, "Card Donation");
                             updateHud();
                             loadClubsFromDb();
@@ -1135,7 +1116,8 @@ document.getElementById('clubFriendlyMatchBtn')?.addEventListener('click', async
 });
 
 window.acceptFriendlyBattle = function (stadium) {
-    startMatchmaking(stadium || 'Adelaide Oval', 0, 'friendly');
+    openCustomRoomModal();
+    showAdNotice('Share a private room code with your clubmate to play.');
 };
 
 function renderClubChest(club) {
@@ -1276,8 +1258,8 @@ document.getElementById('claimClubChestBtn')?.addEventListener('click', async ()
         const res = await fetch('/api/clubs/claim-chest', { method: 'POST' });
         if (res.ok) {
             const data = await res.json();
-            gameState.coins += data.coinsReward || 10000;
-            gameState.gems += data.gemsReward || 100;
+            /* Balance is refreshed from the server. */
+            /* Balance is refreshed from the server. */
             addXp(150, "Weekly Club Chest");
             updateHud();
             alert(data.message);
@@ -1446,7 +1428,7 @@ document.getElementById('confirmCreateClubBtn')?.addEventListener('click', async
 
         const data = await res.json();
         if (data.success) {
-            gameState.coins -= 5000;
+            /* Balance is refreshed from the server. */
             updateHud();
             document.getElementById('createClubModal')?.classList.add('hidden');
             loadClubsFromDb();
@@ -1628,7 +1610,7 @@ function handleSeasonRewardWon(reward) {
     if (!reward || !reward.gems) return;
 
     // Credit gems to live game state
-    gameState.gems += reward.gems;
+    /* Balance is refreshed from the server. */
     updateHud();
 
     // Show celebration modal
@@ -1675,11 +1657,11 @@ function openLevelRoadmap() {
     loadRoadmapFromDb();
 }
 
-async function loadRoadmapFromDb() {
+async function loadRoadmapFromDb(start) {
     const list = document.getElementById('roadmapNodesList');
     try {
-        const userId = gameState.userId || 1;
-        const res = await fetch(`/api/roadmap/status?userId=${userId}`);
+        const res = await fetch('/api/roadmap/status' + (Number.isInteger(start) ? `?start=${start}` : ''));
+        if (!res.ok) throw new Error('Progression is temporarily unavailable. Please retry.');
         if (res.ok) {
             const data = await res.json();
             if (data.success) {
@@ -1689,6 +1671,7 @@ async function loadRoadmapFromDb() {
         }
     } catch (e) {
         console.warn('Roadmap fetch error:', e);
+        if (list) list.innerHTML = '<div class="progression-error">Unable to load your rewards. <button onclick="loadRoadmapFromDb()">Retry</button></div>';
     }
 }
 
@@ -1706,8 +1689,10 @@ function renderRoadmapScreen(data) {
     const xpPct = Math.min(100, Math.round((data.currentXp / data.currentLevelXpReq) * 100));
     if (heroXpFill) heroXpFill.style.width = `${xpPct}%`;
 
-    if (totalClaimedVal) totalClaimedVal.textContent = `${data.totalClaimedCount || 0}/${data.displayMaxLevel || 50}`;
-    if (nextRewardVal) nextRewardVal.textContent = `Level ${data.currentLevel + 1}`;
+    if (totalClaimedVal) totalClaimedVal.textContent = `${data.totalClaimedCount || 0}`;
+    if (nextRewardVal) nextRewardVal.textContent = data.nextMilestone ? `Level ${data.nextMilestone.level}` : 'Maximum level';
+
+    window.ProgressionUI?.renderRoadmap(data);
 
     // 2. Render Vertical Milestone Road Track (Levels 1 to 50+)
     const list = document.getElementById('roadmapNodesList');
@@ -1735,7 +1720,7 @@ function renderRoadmapScreen(data) {
         let rewardsPillsHtml = '';
         if (node.coins) rewardsPillsHtml += `<span class="node-reward-pill coin-pill">🪙 +${node.coins.toLocaleString()}</span>`;
         if (node.gems) rewardsPillsHtml += `<span class="node-reward-pill gem-pill">💎 +${node.gems.toLocaleString()}</span>`;
-        if (node.pack) rewardsPillsHtml += `<span class="node-reward-pill pack-pill">📦 ${node.pack}</span>`;
+        if (node.pack) rewardsPillsHtml += `<span class="node-reward-pill pack-pill">📦 ${escapeHtml(node.pack)}</span>`;
 
         html += `
             <div class="roadmap-node-card ${statusClass} ${keyClass}" id="roadmapNode_${node.level}">
@@ -1745,7 +1730,7 @@ function renderRoadmapScreen(data) {
                 </div>
                 <div class="node-content-col">
                     <div class="node-title-row">
-                        <div class="node-milestone-title">${node.unlock || `Milestone Level ${node.level}`}</div>
+                        <div class="node-milestone-title">${escapeHtml(node.unlock || `Milestone Level ${node.level}`)}</div>
                         ${node.isKeyMilestone ? '<span class="node-key-badge">KEY MILESTONE</span>' : ''}
                     </div>
                     <div class="node-rewards-row">
@@ -1794,16 +1779,14 @@ window.claimRoadmapMilestone = async function (level) {
         const res = await fetch('/api/roadmap/claim', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId, level })
+            body: JSON.stringify({ level })
         });
 
         if (res.ok) {
             const data = await res.json();
             if (data.success && data.reward) {
                 // Update live wallet
-                if (data.reward.coins) gameState.coins += data.reward.coins;
-                if (data.reward.gems) gameState.gems += data.reward.gems;
-                updateHud();
+                applyServerUser(data.updatedUser);
 
                 // Show celebration modal
                 showRoadmapClaimModal(data.reward);
@@ -1871,10 +1854,10 @@ async function loadToursFromDb() {
                     fee: t.entry_fee,
                     prize: t.prize,
                     color: t.color_hex,
-                    online: t.online_players,
+                    online: data.onlinePlayers || 0,
                     unlockLevel: t.min_level
                 }));
-                currentMatchTour = TOURS_DATA[0];
+                if (!currentMatchTour) currentMatchTour = TOURS_DATA[0];
             }
         }
     } catch (e) {
@@ -1904,7 +1887,7 @@ function renderTourList() {
                     <span class="venue-icon">${isLocked ? '🔒' : '🏟️'}</span>
                 </div>
                 <div class="venue-title-row">
-                    <h3 class="venue-city-name">${t.name}</h3>
+                    <h3 class="venue-city-name">${escapeHtml(t.name)}</h3>
                     <span class="tour-tag-pill">TOUR ${t.id}</span>
                 </div>
             </div>
@@ -1915,7 +1898,7 @@ function renderTourList() {
                 </div>
                 <div class="venue-meta-row">
                     <div class="meta-item"><span class="meta-icon">🪙</span> Fee: <strong>${t.fee.toLocaleString()}</strong></div>
-                    <div class="meta-item"><span class="online-indicator">🟢</span> <strong>${t.online.toLocaleString()}</strong> Online</div>
+                    <div class="meta-item"><span class="online-indicator">🟢</span> <strong>${t.online.toLocaleString()}</strong> Players online</div>
                 </div>
                 ${isLocked
                 ? `<div class="tour-locked-banner">🔒 UNLOCKS AT LEVEL ⭐ ${t.unlockLevel}</div>`
@@ -1960,6 +1943,7 @@ function showPlayWithBotPrompt() {
  * Entry into matchmaking.
  */
 function startMatchmakingFlow(tour) {
+    if (window.LiveMatch?.active) return showAdNotice('Finish your current match first.');
     if (!socket || !socket.connected) {
         // If offline / local dev testing, directly offer bot match
         currentMatchTour = tour;
@@ -2003,26 +1987,7 @@ function startMatchmakingFlow(tour) {
         if (matchmaking.active) {
             showPlayWithBotPrompt();
         }
-    }, 3500);
-
-    // Listen for socket events
-    socket.off('matchmaking_timeout').on('matchmaking_timeout', () => {
-        if (matchmaking.active) {
-            showPlayWithBotPrompt();
-        }
-    });
-
-    socket.off('match_found').on('match_found', (data) => {
-        clearTimeout(matchmakingBotTimer);
-        document.getElementById('botPromptContainer')?.classList.add('hidden');
-        if (data?.opponent) {
-            showFoundOpponent(data.opponent);
-        }
-        setTimeout(() => {
-            closeMatchmakingModal();
-            startMatchPlay();
-        }, 800);
-    });
+    }, 15000);
 
     socket.emit('find_match', { tourId: tour.id });
 }
@@ -2068,6 +2033,7 @@ function closeMatchmakingModal() {
  * Launch Ground Match with Bot Opponent
  */
 function startBotMatchPlay() {
+    if (window.LiveMatch?.active) return showAdNotice('Finish your live match first.');
     clearTimeout(matchmakingBotTimer);
 
     // Cancel PvP queue on server so we don't stay in queue
@@ -2117,16 +2083,9 @@ function startBotMatchPlay() {
     if (bowlerNameEl) bowlerNameEl.textContent = bot.name;
     if (bowlerTypeEl) bowlerTypeEl.textContent = bot.role;
 
-    // Deduct tour entry fee if not deducted
-    if (currentMatchTour && currentMatchTour.fee) {
-        if (gameState.coins >= currentMatchTour.fee) {
-            gameState.coins -= currentMatchTour.fee;
-            updateHud();
-        }
-    }
-
     // Immediately go to the 3D ground match!
     setTimeout(() => {
+        if (window.LiveMatch?.active) return;
         closeMatchmakingModal();
         startMatchPlay();
     }, 550);
@@ -2243,6 +2202,12 @@ let inMatchState = {
 };
 
 function startMatchPlay() {
+    if (window.LiveMatch?.active) return;
+    inMatchState.cancelled = false;
+    document.getElementById('matchRoleLabel').textContent = 'PRACTICE - NO REWARDS';
+    document.getElementById('battingControlsOverlay')?.classList.remove('hidden');
+    document.getElementById('bowlingControlsOverlay')?.classList.add('hidden');
+    document.querySelectorAll('.shot-action-btn').forEach(btn => { btn.disabled = false; });
     navigateTo('screen-match');
     inMatchState.p1Score = 0;
     inMatchState.p2Score = 0;
@@ -2297,7 +2262,8 @@ function setupBattingControls() {
 // Shot Click Handler for .shot-action-btn
 document.querySelectorAll('.shot-action-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-        if (!inMatchState.isBatting) return;
+        if (window.LiveMatch?.active || !inMatchState.isBatting) return;
+        inMatchState.isBatting = false;
         clearInterval(inMatchState.timingInterval);
 
         const shot = (btn.dataset.shot || '').toLowerCase();
@@ -2330,7 +2296,7 @@ document.querySelectorAll('.shot-action-btn').forEach(btn => {
         }
 
         if (runs === 6) {
-            gameState.totalSixes++;
+            /* Match statistics are server-owned. */
             addXp(2, "Six Shot");
         }
 
@@ -2392,9 +2358,10 @@ function showCelebrationBanner(runs, isWicket, cb) {
 }
 
 function processBallResult(runs, isWicket) {
+    if (inMatchState.cancelled || window.LiveMatch?.active) return;
     const scoreVal = Math.max(0, runs);
 
-    if (inMatchState.isBatting) {
+    if (inMatchState.innings === 1) {
         inMatchState.p1Score += scoreVal;
         document.getElementById('matchP1Score').textContent = inMatchState.p1Score;
     } else {
@@ -2448,6 +2415,7 @@ function simulateOpponentInnings(target) {
     let ball = 0;
 
     const oppInterval = setInterval(() => {
+        if (inMatchState.cancelled || window.LiveMatch?.active) { clearInterval(oppInterval); return; }
         const outcomes = [0, 1, 2, 4, 6, -1];
         const res = outcomes[Math.floor(Math.random() * outcomes.length)];
         if (res > 0) oppScore += res;
@@ -2478,6 +2446,7 @@ function setupBowlingControls() {
 
 // Bowling Deliver Button
 document.getElementById('lockDeliveryBtn')?.addEventListener('click', () => {
+    if (window.LiveMatch?.active) return;
     // Simulate opponent batsman reaction
     const opponentOutcome = [0, 1, 2, 4, 6, -1][Math.floor(Math.random() * 6)];
     animateDelivery(() => {
@@ -2491,62 +2460,26 @@ document.getElementById('lockDeliveryBtn')?.addEventListener('click', () => {
 // Screen 8: Match Summary & Earnings
 // ----------------------------------------------------
 function finishMatchPlay() {
+    if (inMatchState.cancelled || window.LiveMatch?.active) return;
     navigateTo('screen-result');
-    const won = inMatchState.p1Score >= inMatchState.p2Score;
-
-    gameState.matchesPlayed++;
-    if (won) {
-        gameState.matchesWon++;
-        if (window.Match3DEngine) {
-            window.Match3DEngine.celebrateVictory();
-        }
-        const xpReward = currentMatchTour ? currentMatchTour.id * 15 : 15;
-        addXp(xpReward, "Match Victory");
+    const tied = inMatchState.p1Score === inMatchState.p2Score;
+    const won = inMatchState.p1Score > inMatchState.p2Score;
+    document.getElementById('winnerHeadline').textContent = tied ? 'PRACTICE DRAW' : won ? 'PRACTICE WIN' : 'PRACTICE COMPLETE';
+    document.getElementById('summaryP1Score').textContent = inMatchState.p1Score;
+    document.getElementById('summaryP2Score').textContent = inMatchState.p2Score;
+    document.querySelector('#resultP1Card .res-name').textContent = gameState.username;
+    document.querySelector('#resultP2Card .res-name').textContent = 'Practice opponent';
+    for (const [id, winner] of [['resultP1Card', won && !tied], ['resultP2Card', !won && !tied]]) {
+        const card = document.getElementById(id);
+        card.className = `result-player-card ${winner ? 'card-winner' : 'card-loser'}`;
+        card.querySelector('.card-winner-badge').hidden = !winner;
+        card.querySelector('.res-star').textContent = 'Practice';
     }
-
-    const headline = document.getElementById('winnerHeadline');
-    if (headline) {
-        headline.textContent = won ? "YOU WIN!" : "MATCH DEFEAT";
-        headline.style.color = won ? "#facc15" : "#ef4444";
-    }
-
-    const p1Card = document.getElementById('resultP1Card');
-    const p2Card = document.getElementById('resultP2Card');
-    if (p1Card && p2Card) {
-        p1Card.className = `result-player-card ${won ? 'card-winner' : 'card-loser'}`;
-        p2Card.className = `result-player-card ${won ? 'card-loser' : 'card-winner'}`;
-    }
-
-    const p1ScoreEl = document.getElementById('summaryP1Score');
-    const p2ScoreEl = document.getElementById('summaryP2Score');
-    if (p1ScoreEl) p1ScoreEl.textContent = inMatchState.p1Score;
-    if (p2ScoreEl) p2ScoreEl.textContent = inMatchState.p2Score;
-
-    const payoutNotice = document.getElementById('payoutNotification');
-    if (payoutNotice) {
-        if (won) {
-            const prize = currentMatchTour ? currentMatchTour.prize : 200;
-            gameState.coins += prize;
-            // Diamonds/Gems are ultra-rare and not awarded from regular matches
-            payoutNotice.innerHTML = `
-                <div class="payout-title">TOUR PRIZE COLLECTED</div>
-                <div class="payout-rewards-row">
-                    <div class="payout-pill"><span class="p-icon">🪙</span> +${prize.toLocaleString()} Coins</div>
-                </div>
-            `;
-        } else {
-            const consolation = 20;
-            gameState.coins += consolation;
-            payoutNotice.innerHTML = `
-                <div class="payout-title">CONSOLATION REWARD</div>
-                <div class="payout-rewards-row">
-                    <div class="payout-pill"><span class="p-icon">🪙</span> +${consolation} Coins</div>
-                </div>
-            `;
-        }
-    }
-
-    updateHud();
+    document.getElementById('resultProgressTitle').textContent = 'PRACTICE SESSION';
+    document.getElementById('resultProgressLabel').textContent = 'No ranked progress';
+    document.getElementById('resultProgressFill').style.width = '0%';
+    document.getElementById('payoutNotification').innerHTML = '<div class="payout-title">PRACTICE COMPLETE</div><p>Practice is free. Play a live match to earn coins, XP and level rewards.</p>';
+    initUserProfileFromDb();
 }
 
 document.getElementById('resultContinueBtn')?.addEventListener('click', () => navigateTo('screen-home'));
@@ -2864,7 +2797,7 @@ document.getElementById('confirmUpgradeBtn')?.addEventListener('click', async ()
         if (res.ok) {
             const data = await res.json();
             if (data.success) {
-                gameState.coins -= cost;
+                /* Balance is refreshed from the server. */
                 selectedCardToUpgrade.power = data.card.power;
                 selectedCardToUpgrade.level = data.card.level;
                 selectedCardToUpgrade.copies = data.card.copies;
@@ -2879,16 +2812,7 @@ document.getElementById('confirmUpgradeBtn')?.addEventListener('click', async ()
         }
     } catch (e) { }
 
-    // Fallback local upgrade
-    gameState.coins -= cost;
-    selectedCardToUpgrade.power += 5;
-    selectedCardToUpgrade.level += 1;
-    selectedCardToUpgrade.copies = Math.max(0, selectedCardToUpgrade.copies - selectedCardToUpgrade.maxCopies);
-    selectedCardToUpgrade.maxCopies += 5;
-    addXp(50, "Card Upgrade");
-    updateHud();
-    renderSquadCards();
-    document.getElementById('cardUpgradeModal')?.classList.add('hidden');
+    showAdNotice('Upgrade was not confirmed. Your balance has not changed. Try again.');
 });
 
 document.getElementById('closeUpgradeModalBtn')?.addEventListener('click', () => {
@@ -3057,27 +2981,7 @@ document.getElementById('confirmCountrySelectBtn')?.addEventListener('click', as
 // ----------------------------------------------------
 // Screen 11: Shop & Piggy Bank Actions
 // ----------------------------------------------------
-document.getElementById('buyFeaturedPackBtn')?.addEventListener('click', () => {
-    gameState.coins += 20000;
-    gameState.gems += 200;
-    addXp(100, "Featured Bundle");
-    updateHud();
-    alert("🎉 Epic Bowler Pack Unlocked! +20,000 Coins & +200 Gems added to your wallet.");
-});
-
-document.getElementById('breakPiggyBtn')?.addEventListener('click', () => {
-    if (gameState.gems < 350) {
-        alert("You need 350 Gems to open the Piggy Bank!");
-        return;
-    }
-
-    gameState.gems -= 350;
-    gameState.gems += 385;
-    gameState.coins += 4000;
-    addXp(200, "Piggy Bank");
-    updateHud();
-    alert("🐷 Piggy Bank Opened! +385 Gems, +4,000 Coins, and +2 Cards claimed!");
-});
+// Unavailable offers are visibly disabled until a real purchase flow exists.
 
 // ----------------------------------------------------
 // Screen 12: Ball Skins
@@ -3166,70 +3070,7 @@ function showAdNotice(message = "📢 Video Ads are currently not available. Ple
     }
 }
 
-const FREE_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 Hours Countdown
-
-function initFreeClaimTimer() {
-    const btn = document.getElementById('freeInstantClaimBtn');
-    const sub = btn?.querySelector('.free-claim-sub');
-    if (!btn || !sub) return;
-
-    function tick() {
-        const lastClaimStr = localStorage.getItem('freeClaimTimestamp_v1');
-        if (!lastClaimStr) {
-            btn.classList.remove('claimed');
-            sub.textContent = "Collect now!";
-            return;
-        }
-
-        const lastClaim = parseInt(lastClaimStr, 10);
-        const elapsed = Date.now() - lastClaim;
-        const remaining = FREE_COOLDOWN_MS - elapsed;
-
-        if (remaining <= 0) {
-            btn.classList.remove('claimed');
-            sub.textContent = "Collect now!";
-            localStorage.removeItem('freeClaimTimestamp_v1');
-        } else {
-            btn.classList.add('claimed');
-            const h = Math.floor(remaining / (1000 * 60 * 60));
-            const m = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
-            const s = Math.floor((remaining % (1000 * 60)) / 1000);
-            sub.textContent = `⏱️ ${h.toString().padStart(2, '0')}h ${m.toString().padStart(2, '0')}m ${s.toString().padStart(2, '0')}s`;
-        }
-    }
-
-    tick();
-    setInterval(tick, 1000);
-}
-
-document.getElementById('freeInstantClaimBtn')?.addEventListener('click', () => {
-    const lastClaimStr = localStorage.getItem('freeClaimTimestamp_v1');
-    if (lastClaimStr) {
-        const remaining = FREE_COOLDOWN_MS - (Date.now() - parseInt(lastClaimStr, 10));
-        if (remaining > 0) {
-            const h = Math.floor(remaining / (1000 * 60 * 60));
-            const m = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
-            const s = Math.floor((remaining % (1000 * 60)) / 1000);
-            showAdNotice(`⏱️ Next free reward ready in ${h}h ${m}m ${s}s!`);
-            return;
-        }
-    }
-
-    localStorage.setItem('freeClaimTimestamp_v1', Date.now().toString());
-    gameState.coins += 100;
-    addXp(10, "Free Coins");
-    updateHud();
-
-    const btn = document.getElementById('freeInstantClaimBtn');
-    btn?.classList.add('claimed');
-    const sub = btn?.querySelector('.free-claim-sub');
-    if (sub) sub.textContent = "⏱️ 23h 59m 59s";
-
-    showAdNotice("🎉 +100 Free Coins Claimed!");
-});
-
-// Initialize timer on script load
-initFreeClaimTimer();
+// Free-reward status and claims are handled by progressionClient.js.
 
 document.getElementById('adCollect450')?.addEventListener('click', () => {
     if (currentAdStep < 1) return;
@@ -3268,107 +3109,7 @@ let dynamicFriendsList = [];
 let active1v1ChallengeTimer = null;
 let currentPending1v1Challenge = null;
 
-if (typeof socket !== 'undefined' && socket) {
-    socket.emit('register_player', {
-        playerId: 'player_' + (gameState.level * 100 + 7),
-        username: gameState.username,
-        avatar: '👤',
-        level: gameState.level
-    });
-
-    // 1. Friend accepted your 1v1 challenge!
-    socket.on('1v1_challenge_accepted', (data) => {
-        clearInterval(active1v1ChallengeTimer);
-        const desc = document.getElementById('waitingFriendDesc');
-        if (desc) desc.textContent = `✓ ${data.friend.name} Accepted to play! Loading Stadium...`;
-
-        setTimeout(() => {
-            document.getElementById('waitingFriendModal')?.classList.add('hidden');
-
-            // Set custom 1v1 match profile
-            currentMatchTour = { id: 1, name: `${data.friend.name} 🇮🇳 (1 VS 1)`, fee: 100, prize: 200, color: "#22c55e" };
-
-            // Update Pre-Match opponent card
-            const oppNameEl = document.querySelector('.opponent-prematch-card .p-name');
-            const oppRankEl = document.querySelector('.opponent-prematch-card .p-rank-star');
-            const oppAvatarEl = document.querySelector('.opponent-prematch-card .p-avatar-circle');
-            if (oppNameEl) oppNameEl.textContent = data.friend.name;
-            if (oppRankEl) oppRankEl.textContent = `⭐ ${data.friend.level || 25}`;
-            if (oppAvatarEl) oppAvatarEl.textContent = data.friend.flag || '🇮🇳';
-
-            // Update Local player card
-            const myRankEl = document.querySelector('.local-prematch-card .p-rank-star');
-            if (myRankEl) myRankEl.textContent = `⭐ ${gameState.level}`;
-
-            startPreMatchScreen();
-        }, 1200);
-    });
-
-    // 2. Friend declined your challenge
-    socket.on('1v1_challenge_declined', (data) => {
-        clearInterval(active1v1ChallengeTimer);
-        document.getElementById('waitingFriendModal')?.classList.add('hidden');
-        gameState.coins += 100; // Refund fee
-        updateHud();
-        alert(data.message || "❌ Friend is currently busy and declined the match.");
-    });
-
-    // 3. Receive incoming 1v1 challenge from another friend
-    socket.on('receive_1v1_challenge', (data) => {
-        currentPending1v1Challenge = data;
-        const modal = document.getElementById('incomingChallengeModal');
-        if (!modal) return;
-
-        document.getElementById('challengerName').textContent = data.fromPlayer.username;
-        document.getElementById('challengerRank').textContent = `⭐ ${data.fromPlayer.level} • Pro Player`;
-
-        const timerFill = document.getElementById('challengeTimerFill');
-        if (timerFill) timerFill.style.width = '100%';
-
-        modal.classList.remove('hidden');
-
-        // 15-second countdown timer to accept or decline
-        let secondsLeft = 15;
-        const interval = setInterval(() => {
-            secondsLeft--;
-            if (timerFill) timerFill.style.width = `${(secondsLeft / 15) * 100}%`;
-            if (secondsLeft <= 0) {
-                clearInterval(interval);
-                modal.classList.add('hidden');
-                socket.emit('decline_1v1_challenge', { challengeId: data.challengeId });
-            }
-        }, 1000);
-    });
-}
-
-// Accept incoming 1v1 challenge
-document.getElementById('accept1v1Btn')?.addEventListener('click', () => {
-    if (!currentPending1v1Challenge) return;
-    if (gameState.coins < 100) {
-        alert("You need at least 100 coins to accept this 1 VS 1 match!");
-        return;
-    }
-
-    gameState.coins -= 100;
-    updateHud();
-    document.getElementById('incomingChallengeModal')?.classList.add('hidden');
-
-    if (socket) {
-        socket.emit('accept_1v1_challenge', { challengeId: currentPending1v1Challenge.challengeId });
-    }
-
-    // Launch Match
-    currentMatchTour = { id: 1, name: `${currentPending1v1Challenge.fromPlayer.username} 🇮🇳 (1 VS 1)`, fee: 100, prize: 200, color: "#22c55e" };
-    startPreMatchScreen();
-});
-
-// Decline incoming 1v1 challenge
-document.getElementById('decline1v1Btn')?.addEventListener('click', () => {
-    if (currentPending1v1Challenge && socket) {
-        socket.emit('decline_1v1_challenge', { challengeId: currentPending1v1Challenge.challengeId });
-    }
-    document.getElementById('incomingChallengeModal')?.classList.add('hidden');
-});
+// Friend challenge transport and acceptance are handled by liveMatch.js.
 
 // Load Dynamic Friends & Authentication Status from Backend REST API
 let isCurrentPlayerGuest = false;
@@ -3572,6 +3313,7 @@ document.getElementById('switchToGuestBtn')?.addEventListener('click', async () 
 document.getElementById('friendsWidget')?.addEventListener('click', () => {
     navigateTo('screen-friends');
     loadDynamicFriendsData();
+    loadBattlePassData();
 });
 
 document.getElementById('friendsBackBtn')?.addEventListener('click', () => {
@@ -3900,63 +3642,20 @@ function applyServerUser(user) {
     gameState.level = user.level ?? gameState.level;
     gameState.xp = user.xp ?? gameState.xp;
     gameState.trophies = user.trophies ?? gameState.trophies;
+    gameState.maxXp = user.max_xp ?? gameState.maxXp;
+    gameState.matchesPlayed = user.matches_played ?? gameState.matchesPlayed;
+    gameState.matchesWon = user.matches_won ?? gameState.matchesWon;
+    gameState.totalSixes = user.total_sixes ?? gameState.totalSixes;
     updateHud();
 }
 
 // 1 VS 1 Challenge with Online Friend Acceptance Flow
 function start1v1FriendMatchWithAcceptance(friend) {
-    if (gameState.coins < 100) {
-        alert("You need at least 100 coins to challenge a friend to a 1 VS 1 match!");
-        return;
-    }
-
-    gameState.coins -= 100;
-    updateHud();
-
-    const waitingModal = document.getElementById('waitingFriendModal');
-    const waitingDesc = document.getElementById('waitingFriendDesc');
-    const waitingCount = document.getElementById('waitingCountdownText');
-
-    if (waitingDesc) waitingDesc.textContent = `Waiting for ${friend.name} to accept...`;
-    if (waitingModal) waitingModal.classList.remove('hidden');
-
-    let seconds = 15;
-    if (waitingCount) waitingCount.textContent = `⏱️ ${seconds}s`;
-
-    clearInterval(active1v1ChallengeTimer);
-    active1v1ChallengeTimer = setInterval(() => {
-        seconds--;
-        if (waitingCount) waitingCount.textContent = `⏱️ ${seconds}s`;
-        if (seconds <= 0) {
-            clearInterval(active1v1ChallengeTimer);
-            waitingModal?.classList.add('hidden');
-            gameState.coins += 100; // Refund fee
-            updateHud();
-            alert(`⏱️ ${friend.name} did not accept the match in time. 100 coins refunded.`);
-        }
-    }, 1000);
-
-    // Cancel Challenge button
-    document.getElementById('cancel1v1ChallengeBtn').onclick = () => {
-        clearInterval(active1v1ChallengeTimer);
-        waitingModal?.classList.add('hidden');
-        gameState.coins += 100; // Refund fee
-        updateHud();
-        if (socket) socket.emit('decline_1v1_challenge', { challengeId: 'cancel' });
-    };
-
-    // Emit live 1v1 challenge over Socket.io
-    if (socket) {
-        socket.emit('send_1v1_challenge', {
-            fromPlayer: {
-                username: gameState.username,
-                avatar: '👤',
-                level: gameState.level
-            },
-            toPlayerId: friend.id,
-            friendName: friend.name
-        });
-    }
+    if (!socket?.connected) return showAdNotice('Connect to the server to challenge a friend.');
+    if (window.LiveMatch?.active) return showAdNotice('Finish your current match first.');
+    document.getElementById('waitingFriendDesc').textContent = `Waiting for ${friend.name} to accept...`;
+    document.getElementById('waitingFriendModal')?.classList.remove('hidden');
+    socket.emit('send_1v1_challenge', { toUserId: friend.id });
 }
 
 // ----------------------------------------------------
@@ -4026,6 +3725,7 @@ async function initReferralDetector() {
                 const confirmBtn = document.getElementById('confirmReferralRewardBtn');
                 if (confirmBtn) {
                     confirmBtn.onclick = async () => {
+                        confirmBtn.disabled = true;
                         try {
                             const claimRes = await fetch('/api/referral/claim', {
                                 method: 'POST',
@@ -4037,12 +3737,10 @@ async function initReferralDetector() {
                                 })
                             });
 
+                            const claimData = await claimRes.json();
                             if (claimRes.ok) {
-                                const claimData = await claimRes.json();
                                 if (claimData.success) {
-                                    gameState.coins += claimData.coinsAwarded || 1500;
-                                    addXp(claimData.xpAwarded || 50, "Referral Welcome Bonus");
-                                    updateHud();
+                                    await window.ProgressionUI?.refresh();
 
                                     localStorage.setItem(`claimed_ref_${refCode.toUpperCase()}`, 'true');
 
@@ -4050,21 +3748,16 @@ async function initReferralDetector() {
                                     window.history.replaceState({}, document.title, window.location.pathname);
 
                                     modal.classList.add('hidden');
-                                    alert(`🎉 +1,500 🪙 Coins Welcome Bonus Claimed! Have fun playing Cricket League!`);
+                                    showGameToast(`Welcome reward collected: +${Number(claimData.coinsAwarded).toLocaleString()} coins, +${claimData.xpAwarded} XP`);
                                 } else {
                                     modal.classList.add('hidden');
                                     alert(claimData.message || "Referral reward already claimed.");
                                 }
-                            }
+                            } else throw new Error(claimData.message || 'Unable to claim your referral reward. Please retry.');
                         } catch (err) {
-                            // Fallback local credit
-                            gameState.coins += 1500;
-                            addXp(50, "Referral Welcome Bonus");
-                            updateHud();
-                            localStorage.setItem(`claimed_ref_${refCode.toUpperCase()}`, 'true');
-                            window.history.replaceState({}, document.title, window.location.pathname);
-                            modal.classList.add('hidden');
-                            alert(`🎉 +1,500 🪙 Coins Welcome Bonus Claimed!`);
+                            showGameToast(err.message || 'Connection lost. Please retry your referral claim.');
+                        } finally {
+                            confirmBtn.disabled = false;
                         }
                     };
                 }
@@ -4174,8 +3867,8 @@ if (typeof window !== 'undefined') {
 }
 
 /* ====================================================
-   FREE FIRE AAA SUITE: 
-   1. Strike Battle Pass (Free Fire Elite Pass)
+   ADDITIONAL GAME FEATURES:
+   1. Strike Battle Pass
    2. 7-Day Daily Login Streak & Mega Box
    3. Weekend Club Wars (Dog Tags)
    4. In-Match Celebrations & Emote Wheel
@@ -4776,9 +4469,8 @@ function renderDailyStreakCalendar(calendar, canClaimToday, secondsUntilMidnight
                 </div>
             </div>
             <div class="mega-ribbon-rewards">
-                <span class="mega-pill-tag gold">🪙 5,000</span>
-                <span class="mega-pill-tag cyan">💎 ${day7.gems || 25}</span>
-                <span class="mega-pill-tag purple">⚡ Ball</span>
+                <span class="mega-pill-tag gold">🪙 ${Number(day7.coins || 0).toLocaleString()}</span>
+                <span class="mega-pill-tag cyan">💎 ${day7.gems || 0}</span>
                 ${day7.isClaimed ? `<span class="mega-check-badge">✓ CLAIMED</span>` : ''}
             </div>
         `;
@@ -5014,72 +4706,10 @@ function openCustomRoomModal() {
 document.getElementById('homeCustomRoomWidget')?.addEventListener('click', openCustomRoomModal);
 document.getElementById('closeCustomRoomModal')?.addEventListener('click', () => {
     document.getElementById('customRoomModal')?.classList.add('hidden');
-    if (customRoomPollTimer) clearInterval(customRoomPollTimer);
+    socket?.emit('cancel_custom_room');
 });
 
-document.getElementById('btnCreateCustomRoom')?.addEventListener('click', async () => {
-    const stadium = document.getElementById('customRoomStadiumSelect')?.value || 'Adelaide Oval';
-    try {
-        const res = await fetch('/api/rooms/create', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                hostUserId: gameState.userId || 1,
-                hostUsername: gameState.username || 'Player',
-                stadium
-            })
-        });
-        const data = await res.json();
-        if (data.success) {
-            document.getElementById('roomCreatedBox')?.classList.remove('hidden');
-            const codeStr = String(data.roomCode || '0000');
-            const digits = codeStr.split('');
-            const d1 = document.getElementById('pinDigit1'); if (d1) d1.textContent = digits[0] || '0';
-            const d2 = document.getElementById('pinDigit2'); if (d2) d2.textContent = digits[1] || '0';
-            const d3 = document.getElementById('pinDigit3'); if (d3) d3.textContent = digits[2] || '0';
-            const d4 = document.getElementById('pinDigit4'); if (d4) d4.textContent = digits[3] || '0';
-            const codeVal = document.getElementById('createdRoomCodeVal'); if (codeVal) codeVal.textContent = codeStr;
-
-            // Poll for opponent joining
-            if (customRoomPollTimer) clearInterval(customRoomPollTimer);
-            customRoomPollTimer = setInterval(async () => {
-                const checkRes = await (await fetch(`/api/rooms/status?code=${data.roomCode}`)).json();
-                if (checkRes.success && checkRes.status === 'PLAYING') {
-                    clearInterval(customRoomPollTimer);
-                    document.getElementById('customRoomModal')?.classList.add('hidden');
-                    startMatchmaking(data.stadium, 0, 'custom');
-                }
-            }, 2000);
-        }
-    } catch (e) { }
-});
-
-document.getElementById('btnJoinCustomRoom')?.addEventListener('click', async () => {
-    const code = document.getElementById('joinRoomCodeInput')?.value;
-    if (!code || code.length < 4) {
-        alert("Please enter a valid 4-digit room code!");
-        return;
-    }
-
-    try {
-        const res = await fetch('/api/rooms/join', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                guestUserId: gameState.userId || 1,
-                guestUsername: gameState.username || 'Player',
-                roomCode: code
-            })
-        });
-        const data = await res.json();
-        if (data.success) {
-            document.getElementById('customRoomModal')?.classList.add('hidden');
-            startMatchmaking(data.stadium || 'Adelaide Oval', 0, 'custom');
-        } else {
-            alert(data.message);
-        }
-    } catch (e) { }
-});
+// Custom room creation/joining uses the authenticated socket in liveMatch.js.
 
 // Custom Glass Stadium Dropdown Logic
 const dropdownTrigger = document.getElementById('customStadiumDropdownTrigger');

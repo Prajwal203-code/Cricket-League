@@ -121,6 +121,12 @@
             }
         }
 
+        if (response.ok && (init.method || 'GET').toUpperCase() !== 'GET') {
+            try {
+                const data = await response.clone().json();
+                if (data.success) window.dispatchEvent(new CustomEvent('server-action', { detail: data }));
+            } catch { /* A non-JSON response is handled by its caller. */ }
+        }
         return response;
     }
 

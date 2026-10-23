@@ -46,6 +46,13 @@ __pycache__/
 *$py.class
 .gstack/
 .load-test-results/
+.cleanup-archive/
+backend/config/history/
+backend/config/*.tmp
+tools/*.png
+tools/*.jpg
+tools/*_report.*
+backend/public/models/verification_renders/
 
 # Temporary bridge & load test files
 blender_output.txt

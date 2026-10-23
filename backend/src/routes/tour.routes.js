@@ -7,7 +7,7 @@ router.get('/', async (req, res) => {
     try {
         const pool = getPool();
         const [rows] = await pool.query('SELECT * FROM tours ORDER BY tour_number ASC');
-        res.json({ success: true, tours: rows });
+        res.json({ success: true, tours: rows.map(t => ({ ...t, online_players: undefined })), onlinePlayers: require('../services/presence').onlineCount() });
     } catch (err) {
         console.error('SQL Error in tours route:', err.message);
         res.status(500).json({ success: false, message: 'Database error fetching tours' });

@@ -9,7 +9,9 @@
  */
 const crypto = require('crypto');
 const { getPool, syncUserSquadForCountry } = require('../config/db');
-const { ECONOMY, xpForLevel } = require('../config/gameRules');
+const { ECONOMY } = require('../config/gameRules');
+const { getRules, WALLET_LIMIT } = require('../config/liveRules');
+const { advanceProgress, rewardForLevel, xpForLevel } = require('./progression');
 
 /** Columns safe to return to a client. Excludes email and social_id. */
 const PUBLIC_USER_FIELDS = `
@@ -30,7 +32,7 @@ function generateReferralCode(username) {
 async function getUserById(userId, conn = null) {
     const db = conn || getPool();
     const [rows] = await db.query(`SELECT ${PUBLIC_USER_FIELDS} FROM users WHERE id = ?`, [userId]);
-    return rows[0] || null;
+    return rows[0] ? { ...rows[0], max_xp: xpForLevel(rows[0].level) } : null;
 }
 
 /**
@@ -128,8 +130,27 @@ async function linkSocialIdentity(userId, { provider, socialId, email, avatar })
  * @param {object} delta - { coins, gems, trophies, xp, sixes, matchPlayed, matchWon }
  * @param {object} [conn] - existing transaction connection
  */
-async function applyWalletDelta(userId, delta = {}, conn = null) {
-    const db = conn || getPool();
+async function applyWalletDelta(userId, delta = {}, conn = null, rules = getRules()) {
+    // FOR UPDATE only protects the read when all statements share a transaction.
+    if (!conn) {
+        const transaction = await getPool().getConnection();
+        try {
+            await transaction.beginTransaction();
+            const result = await applyWalletDelta(userId, delta, transaction, rules);
+            await transaction.commit();
+            return result;
+        } catch (error) {
+            await transaction.rollback();
+            throw error;
+        } finally { transaction.release(); }
+    }
+    const db = conn;
+    for (const key of ['coins', 'gems', 'trophies', 'xp', 'sixes']) {
+        if (delta[key] !== undefined && (!Number.isSafeInteger(delta[key]) || Math.abs(delta[key]) > WALLET_LIMIT)) {
+            throw new RangeError(`Invalid wallet delta: ${key}`);
+        }
+    }
+    if ((delta.xp ?? 0) < 0 || (delta.sixes ?? 0) < 0) throw new RangeError('Progress increments cannot be negative');
 
     const coins = Math.trunc(delta.coins || 0);
     const gems = Math.trunc(delta.gems || 0);
@@ -153,14 +174,23 @@ async function applyWalletDelta(userId, delta = {}, conn = null) {
     if (gems < 0 && current.gems + gems < 0) return null;
 
     // Level-ups roll forward: a large XP award can cross several levels.
-    let newXp = current.xp + xpGain;
-    let newLevel = current.level;
-    let levelUpCoins = 0;
-    while (newXp >= xpForLevel(newLevel)) {
-        newXp -= xpForLevel(newLevel);
-        newLevel += 1;
-        levelUpCoins += newLevel * ECONOMY.levelUpCoinsPerLevel;
+    const progress = advanceProgress(current.level, current.xp, xpGain, rules);
+    const newXp = progress.xp;
+    const newLevel = progress.level;
+    const levelUpCoins = progress.levelUpCoins;
+    const milestoneRewards = [];
+    for (const level of progress.levels) {
+        const reward = rewardForLevel(level, rules);
+        const [claimed] = await db.query('SELECT id FROM user_level_rewards WHERE user_id = ? AND level = ?', [userId, level]);
+        if (claimed.length) continue;
+        await db.query(`INSERT INTO user_level_rewards
+            (user_id, level, coins_awarded, gems_awarded, pack_awarded, rules_version)
+            VALUES (?, ?, ?, ?, '', ?)`, [userId, level, reward.coins, reward.gems, rules.version]);
+        milestoneRewards.push(reward);
     }
+    const creditedCoins = coins + levelUpCoins + milestoneRewards.reduce((sum, r) => sum + r.coins, 0);
+    const creditedGems = gems + milestoneRewards.reduce((sum, r) => sum + r.gems, 0);
+    if (current.coins + creditedCoins > WALLET_LIMIT || current.gems + creditedGems > WALLET_LIMIT) throw new RangeError('Wallet limit exceeded');
 
     await db.query(
         `UPDATE users SET
@@ -173,15 +203,22 @@ async function applyWalletDelta(userId, delta = {}, conn = null) {
             matches_played = matches_played + ?,
             matches_won = matches_won + ?
           WHERE id = ?`,
-        [coins + levelUpCoins, gems, trophies, newXp, newLevel, sixes, matchPlayed, matchWon, userId]
+        [creditedCoins, creditedGems, trophies, newXp, newLevel, sixes, matchPlayed, matchWon, userId]
     );
+
+    await db.query(`INSERT INTO wallet_ledger
+        (user_id, reason, coins_delta, gems_delta, xp_awarded, level_before, level_after, coins_after, gems_after, rules_version)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [userId, String(delta.reason || 'game_action').slice(0, 80),
+        creditedCoins, creditedGems, xpGain, current.level, newLevel, current.coins + creditedCoins, current.gems + creditedGems, rules.version]);
 
     const updated = await getUserById(userId, db);
     return {
         user: updated,
         leveledUp: newLevel > current.level,
         newLevel,
-        levelUpCoins
+        levelUpCoins,
+        milestoneRewards,
+        rulesVersion: rules.version
     };
 }
 
